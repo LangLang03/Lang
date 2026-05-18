@@ -60,6 +60,7 @@ enum class Opcode : std::uint16_t {
   kCheckRole,
   kCheckRoleIndirect,
   kNullCheck,
+  kAssert,
   kCall,
   kCallIndirect,
   kOutputInt,

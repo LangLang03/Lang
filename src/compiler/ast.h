@@ -24,6 +24,12 @@ struct FunctionCallArg {
     SourceLocation location;
 };
 
+struct IoClause {
+    bool present = false;
+    ExprPtr reason;
+    SourceLocation location;
+};
+
 struct AuthorizeCall {
     std::string target;
     std::vector<FunctionCallArg> arguments;
@@ -38,6 +44,7 @@ struct AuthorizeCall {
     int approvalTimeout = 0;
     std::string authorityChain;
     std::optional<std::string> approvalFunction;
+    IoClause io;
     SourceLocation location;
 };
 
@@ -57,6 +64,7 @@ enum class ExprKind {
     Identifier,
     Unary,
     Binary,
+    Conditional,
     Compute,
     Field,
     Gate,
@@ -70,6 +78,7 @@ struct Expr {
     bool declaredLiteral = false;
     ExprPtr left;
     ExprPtr right;
+    ExprPtr third;
     std::vector<GateOp> gateOps;
     AuthorizeCall authorizeCall;
 };
@@ -102,6 +111,31 @@ struct FptrAssignStmt {
     SourceLocation location;
 };
 
+struct ProofStmt {
+    std::string form;
+    std::string name;
+    ExprPtr premise;
+    ExprPtr claim;
+    ExprPtr reason;
+    SourceLocation location;
+};
+
+struct FormalClause {
+    std::string kind;
+    ExprPtr expression;
+    ExprPtr reason;
+    SourceLocation location;
+};
+
+struct JudgmentClause {
+    bool present = false;
+    std::string authority;
+    ExprPtr reason;
+    int declaredElseIfCount = -1;
+    int declaredElseCount = -1;
+    SourceLocation location;
+};
+
 struct RoleStmt {
     std::string op;
     std::string role;
@@ -121,11 +155,13 @@ enum class StatementKind {
     VerifyFunctionIdentity,
     AuthorizeCall,
     FptrAssign,
+    Proof,
     Gate,
     OperatorInput,
     Role,
     If,
     While,
+    DoUntil,
     For,
     Break,
     Continue,
@@ -157,10 +193,15 @@ struct Statement {
     ExprPtr initializer;
     ExprPtr increment;
     AuthorizeCall authorizeCall;
+    IoClause io;
     FptrAssignStmt fptrAssign;
+    ProofStmt proof;
     RoleStmt role;
     InstantiateStmt instantiate;
     std::string identifier;
+    JudgmentClause judgment;
+    JudgmentClause elseJudgment;
+    std::vector<FormalClause> formalClauses;
     std::vector<StatementPtr> thenBody;
     std::vector<StatementPtr> elseBody;
 };

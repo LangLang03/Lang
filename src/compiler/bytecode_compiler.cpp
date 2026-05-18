@@ -8,6 +8,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 namespace torture::compiler {
 namespace {
@@ -36,6 +37,7 @@ constexpr std::string_view kBinaryGreater = ">";
 constexpr std::string_view kBinaryGreaterEqual = ">=";
 constexpr std::string_view kBinaryAnd = "&&";
 constexpr std::string_view kBinaryOr = "||";
+constexpr std::size_t kPendingContinueTarget = static_cast<std::size_t>(-1);
 
 std::string categoryName(FunctionCategory category) {
     switch (category) {
@@ -178,6 +180,12 @@ private:
     struct LoopContext {
         std::size_t continueTarget = 0;
         std::vector<std::size_t> breakJumps;
+        std::vector<std::size_t> continueJumps;
+    };
+
+    struct LoopFormalState {
+        std::vector<const FormalClause*> invariants;
+        std::vector<std::pair<const FormalClause*, std::string>> decreases;
     };
 
     void declareLocal(const std::string& name) {
@@ -231,6 +239,9 @@ private:
             declareLocal(statement.fptrAssign.variable);
             emit(vm::Opcode::kStorePointer, {statement.fptrAssign.variable, statement.fptrAssign.target});
             break;
+        case StatementKind::Proof:
+            compileProof(statement.proof);
+            break;
         case StatementKind::Gate:
             compileExpr(*statement.expression);
             emit(vm::Opcode::kPop);
@@ -260,6 +271,9 @@ private:
         case StatementKind::While:
             compileWhile(statement);
             break;
+        case StatementKind::DoUntil:
+            compileDoUntil(statement);
+            break;
         case StatementKind::For:
             compileFor(statement);
             break;
@@ -275,7 +289,11 @@ private:
                 diagnostics_.error("compiler", "continue-outside-loop", statement.location, "continue must appear inside a loop");
                 break;
             }
-            emit(vm::Opcode::kJump, {std::to_string(loopStack_.back().continueTarget)});
+            if (loopStack_.back().continueTarget == kPendingContinueTarget) {
+                loopStack_.back().continueJumps.push_back(emit(vm::Opcode::kJump, {owned(kIntegerZero)}));
+            } else {
+                emit(vm::Opcode::kJump, {std::to_string(loopStack_.back().continueTarget)});
+            }
             break;
         case StatementKind::ClockCycle:
         case StatementKind::YieldGate:
@@ -473,6 +491,9 @@ private:
         case ExprKind::Binary:
             compileBinary(expr);
             break;
+        case ExprKind::Conditional:
+            compileConditional(expr);
+            break;
         case ExprKind::Gate:
             compileGate(expr);
             break;
@@ -555,15 +576,44 @@ private:
     }
 
     void compileWhile(const Statement& statement) {
+        auto formalState = compileLoopEntryFormalClauses(statement);
         const auto loopStart = out_.code.size();
         compileExpr(*statement.expression);
         const auto jumpEnd = emit(vm::Opcode::kJumpIfZero, {owned(kIntegerZero)});
-        loopStack_.push_back(LoopContext{loopStart, {}});
+        loopStack_.push_back(LoopContext{kPendingContinueTarget, {}, {}});
         for (const auto& child : statement.thenBody) {
             compileStatement(*child);
         }
+        const auto iterationCheckStart = out_.code.size();
+        auto continues = std::move(loopStack_.back().continueJumps);
+        for (const auto jump : continues) {
+            patch(jump, iterationCheckStart);
+        }
+        compileLoopIterationFormalClauses(formalState);
         emit(vm::Opcode::kJump, {std::to_string(loopStart)});
         patch(jumpEnd, out_.code.size());
+        const auto breaks = std::move(loopStack_.back().breakJumps);
+        loopStack_.pop_back();
+        for (const auto jump : breaks) {
+            patch(jump, out_.code.size());
+        }
+    }
+
+    void compileDoUntil(const Statement& statement) {
+        auto formalState = compileLoopEntryFormalClauses(statement);
+        const auto loopStart = out_.code.size();
+        loopStack_.push_back(LoopContext{kPendingContinueTarget, {}, {}});
+        for (const auto& child : statement.thenBody) {
+            compileStatement(*child);
+        }
+        const auto conditionStart = out_.code.size();
+        auto continues = std::move(loopStack_.back().continueJumps);
+        for (const auto jump : continues) {
+            patch(jump, conditionStart);
+        }
+        compileLoopIterationFormalClauses(formalState);
+        compileExpr(*statement.expression);
+        emit(vm::Opcode::kJumpIfZero, {std::to_string(loopStart)});
         const auto breaks = std::move(loopStack_.back().breakJumps);
         loopStack_.pop_back();
         for (const auto jump : breaks) {
@@ -576,22 +626,27 @@ private:
             compileExpr(*statement.initializer);
             emit(vm::Opcode::kPop);
         }
+        auto formalState = compileLoopEntryFormalClauses(statement);
         const auto loopStart = out_.code.size();
         std::optional<std::size_t> jumpEnd;
         if (statement.expression) {
             compileExpr(*statement.expression);
             jumpEnd = emit(vm::Opcode::kJumpIfZero, {owned(kIntegerZero)});
         }
-        loopStack_.push_back(LoopContext{loopStart, {}});
+        loopStack_.push_back(LoopContext{kPendingContinueTarget, {}, {}});
         for (const auto& child : statement.thenBody) {
             compileStatement(*child);
         }
         const auto incrementStart = out_.code.size();
-        loopStack_.back().continueTarget = incrementStart;
+        auto continues = std::move(loopStack_.back().continueJumps);
+        for (const auto jump : continues) {
+            patch(jump, incrementStart);
+        }
         if (statement.increment) {
             compileExpr(*statement.increment);
             emit(vm::Opcode::kPop);
         }
+        compileLoopIterationFormalClauses(formalState);
         emit(vm::Opcode::kJump, {std::to_string(loopStart)});
         if (jumpEnd) {
             patch(*jumpEnd, out_.code.size());
@@ -601,6 +656,84 @@ private:
         for (const auto jump : breaks) {
             patch(jump, out_.code.size());
         }
+    }
+
+    void compileProof(const ProofStmt& proof) {
+        const auto label = proof.form + " " + proof.name;
+        if (proof.form == "theorem" && proof.premise) {
+            compileExpr(*proof.premise);
+            const auto skipClaim = emit(vm::Opcode::kJumpIfZero, {owned(kIntegerZero)});
+            compileAssertedExpr(*proof.claim, label);
+            patch(skipClaim, out_.code.size());
+            return;
+        }
+        compileAssertedExpr(*proof.claim, label);
+    }
+
+    void compileAssertedExpr(const Expr& expr, const std::string& label) {
+        compileExpr(expr);
+        emit(vm::Opcode::kAssert, {label});
+    }
+
+    LoopFormalState compileLoopEntryFormalClauses(const Statement& statement) {
+        LoopFormalState state;
+        for (const auto& clause : statement.formalClauses) {
+            const auto label = loopClauseLabel(clause);
+            if (isSymbol(clause.kind, "invariant")) {
+                compileAssertedExpr(*clause.expression, label);
+                state.invariants.push_back(&clause);
+                continue;
+            }
+            if (isSymbol(clause.kind, "decreases")) {
+                const auto previous = "__decreases" + std::to_string(tempIndex_++);
+                declareLocal(previous);
+                compileExpr(*clause.expression);
+                emit(vm::Opcode::kStore, {previous});
+                compileStoredNonNegative(previous, label);
+                state.decreases.push_back({&clause, previous});
+            }
+        }
+        return state;
+    }
+
+    void compileLoopIterationFormalClauses(const LoopFormalState& state) {
+        for (const auto* invariant : state.invariants) {
+            compileAssertedExpr(*invariant->expression, loopClauseLabel(*invariant));
+        }
+        for (const auto& [clause, previous] : state.decreases) {
+            const auto current = "__decreases" + std::to_string(tempIndex_++);
+            declareLocal(current);
+            compileExpr(*clause->expression);
+            emit(vm::Opcode::kStore, {current});
+            compileStoredNonNegative(current, loopClauseLabel(*clause));
+            emit(vm::Opcode::kLoad, {current});
+            emit(vm::Opcode::kLoad, {previous});
+            emit(vm::Opcode::kLess);
+            emit(vm::Opcode::kAssert, {"strictly decreasing " + loopClauseLabel(*clause)});
+            emit(vm::Opcode::kLoad, {current});
+            emit(vm::Opcode::kStore, {previous});
+        }
+    }
+
+    void compileStoredNonNegative(const std::string& local, const std::string& label) {
+        emit(vm::Opcode::kLoad, {local});
+        emit(vm::Opcode::kPushInteger, {owned(kIntegerZero)});
+        emit(vm::Opcode::kGreaterEqual);
+        emit(vm::Opcode::kAssert, {"non-negative " + label});
+    }
+
+    std::string loopClauseLabel(const FormalClause& clause) const {
+        return clause.kind + "@" + std::to_string(clause.location.line) + ":" + std::to_string(clause.location.column);
+    }
+
+    void compileConditional(const Expr& expr) {
+        compileExpr(*expr.left);
+        const auto jumpFalse = emit(vm::Opcode::kJumpIfZero, {owned(kIntegerZero)});
+        compileExpr(*expr.right);
+        const auto jumpEnd = emit(vm::Opcode::kJump, {owned(kIntegerZero)});
+        patch(jumpFalse, out_.code.size());
+        compileExpr(*expr.third);
+        patch(jumpEnd, out_.code.size());
     }
 
     void compileGate(const Expr& expr) {

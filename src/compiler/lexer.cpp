@@ -10,21 +10,21 @@ namespace {
 
 const std::unordered_set<std::string>& keywords() {
     static const std::unordered_set<std::string> value = {
-        "actor", "alignof", "allowed", "alwaysapprove", "alwaysdeny", "and", "approval", "arguments", "assign",
+        "actor", "alignof", "allowed", "alwaysapprove", "alwaysdeny", "and", "approval", "arguments", "assign", "assume", "axiom",
         "abstractfactory", "at", "attach", "authority", "authorize", "because", "bool", "break", "bus", "by", "callable", "capture",
         "caseinsensitive", "casesensitive", "catch", "chain", "char", "class", "clockcycle", "clone", "code",
-        "compare", "compute", "computational", "confirm", "continue", "copy", "declare", "delegate", "deny", "destroy", "deserialize",
-        "detach", "discard", "discarding", "do", "ecc", "else", "exception", "extend", "false", "field",
+        "compare", "compute", "computational", "conditional", "confirm", "continue", "convene", "copy", "declare", "delegate", "deny", "destroy", "deserialize",
+        "decreases", "detach", "discard", "discarding", "do", "ecc", "else", "elseifs", "ensures", "exception", "expects", "extend", "false", "field",
         "authorized", "dependencyinjection", "fieldcount", "fields", "float", "for", "from", "fptr", "function", "factory", "gate", "getproperty", "getsize",
         "global", "grant", "grantor", "hash", "if", "ignore", "immutable", "implement", "inherits", "injecting", "injects", "in", "inputchar", "into", "instantiate", "invocation",
-        "inputint", "int", "integrity", "invoke", "io", "isolation", "justify", "justification", "level",
+        "inputint", "int", "integrity", "invariant", "invoke", "io", "isolation", "judge", "judging", "justify", "justification", "ledgerdivergence", "ledgeridentity", "level",
         "limit", "linkage", "literal", "local", "locals", "max", "memory", "method", "methods", "move", "mutable", "nand", "nominate",
-        "nor", "not", "null", "nullcheck", "of", "onchange", "onread", "onwrite", "operatorinput",
-        "or", "outputchar", "outputint", "overflow", "patterns", "predictstackdepth", "println", "private", "proceed", "prompt", "protected",
-        "ptr", "public", "purpose", "readable", "ref", "reference", "register", "require", "requires", "response", "return",
+        "nor", "not", "null", "nullcheck", "of", "onchange", "onread", "onwrite", "operation", "operatorinput", "over",
+        "or", "outputchar", "outputint", "overflow", "patterns", "predictstackdepth", "println", "private", "proceed", "proof", "prompt", "protected",
+        "prove", "ptr", "public", "purpose", "readable", "ref", "reference", "register", "require", "requires", "response", "return",
         "returnable", "revoke", "role", "roles", "saturate", "scope", "seal", "security", "serialize",
-        "setproperty", "signature", "size", "stack", "storage", "struct", "synchronized", "thread",
-        "strategy", "timeout", "to", "trace", "trap", "true", "trustee", "type", "uint", "uncallable", "unseal",
+        "setproperty", "signature", "size", "stack", "storage", "struct", "synchronized", "than", "theorem", "therefore", "thread",
+        "strategy", "timeout", "to", "trace", "trap", "tribunal", "true", "trustee", "type", "uint", "uncallable", "unseal",
         "until", "value", "verifyfunctionidentity", "verifymemoryintegrity", "via", "void", "volatile",
         "where", "while", "wire", "with", "wrap", "writable", "xor", "yield", "yieldgate",
     };
@@ -33,6 +33,63 @@ const std::unordered_set<std::string>& keywords() {
 
 bool isPrintableAscii(unsigned char value) {
     return value >= 0x20U && value <= 0x7eU;
+}
+
+bool isUtf8Continuation(unsigned char value) {
+    return (value & 0xc0U) == 0x80U;
+}
+
+bool validUtf8Sequence(std::string_view text, std::size_t index, std::size_t& length) {
+    const auto lead = static_cast<unsigned char>(text[index]);
+    if (lead >= 0xc2U && lead <= 0xdfU) {
+        length = 2;
+        return index + 1 < text.size() && isUtf8Continuation(static_cast<unsigned char>(text[index + 1]));
+    }
+    if (lead == 0xe0U) {
+        length = 3;
+        return index + 2 < text.size() &&
+            static_cast<unsigned char>(text[index + 1]) >= 0xa0U &&
+            static_cast<unsigned char>(text[index + 1]) <= 0xbfU &&
+            isUtf8Continuation(static_cast<unsigned char>(text[index + 2]));
+    }
+    if ((lead >= 0xe1U && lead <= 0xecU) || (lead >= 0xeeU && lead <= 0xefU)) {
+        length = 3;
+        return index + 2 < text.size() &&
+            isUtf8Continuation(static_cast<unsigned char>(text[index + 1])) &&
+            isUtf8Continuation(static_cast<unsigned char>(text[index + 2]));
+    }
+    if (lead == 0xedU) {
+        length = 3;
+        return index + 2 < text.size() &&
+            static_cast<unsigned char>(text[index + 1]) >= 0x80U &&
+            static_cast<unsigned char>(text[index + 1]) <= 0x9fU &&
+            isUtf8Continuation(static_cast<unsigned char>(text[index + 2]));
+    }
+    if (lead == 0xf0U) {
+        length = 4;
+        return index + 3 < text.size() &&
+            static_cast<unsigned char>(text[index + 1]) >= 0x90U &&
+            static_cast<unsigned char>(text[index + 1]) <= 0xbfU &&
+            isUtf8Continuation(static_cast<unsigned char>(text[index + 2])) &&
+            isUtf8Continuation(static_cast<unsigned char>(text[index + 3]));
+    }
+    if (lead >= 0xf1U && lead <= 0xf3U) {
+        length = 4;
+        return index + 3 < text.size() &&
+            isUtf8Continuation(static_cast<unsigned char>(text[index + 1])) &&
+            isUtf8Continuation(static_cast<unsigned char>(text[index + 2])) &&
+            isUtf8Continuation(static_cast<unsigned char>(text[index + 3]));
+    }
+    if (lead == 0xf4U) {
+        length = 4;
+        return index + 3 < text.size() &&
+            static_cast<unsigned char>(text[index + 1]) >= 0x80U &&
+            static_cast<unsigned char>(text[index + 1]) <= 0x8fU &&
+            isUtf8Continuation(static_cast<unsigned char>(text[index + 2])) &&
+            isUtf8Continuation(static_cast<unsigned char>(text[index + 3]));
+    }
+    length = 0;
+    return false;
 }
 
 bool isIdentifierStart(char ch) {
@@ -82,6 +139,7 @@ bool isSingleSymbol(char ch) {
     case '/':
     case ':':
     case '!':
+    case '?':
         return true;
     default:
         return false;
@@ -138,26 +196,6 @@ LexResult lexSource(const SourceFile& source, Diagnostics& diagnostics) {
         return ch;
     };
 
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        const auto byte = static_cast<unsigned char>(text[i]);
-        if (text[i] == '\n') {
-            continue;
-        }
-        if (!isPrintableAscii(byte)) {
-            SourceLocation bad{source.path, 1, 1};
-            for (std::size_t j = 0; j < i; ++j) {
-                if (text[j] == '\n') {
-                    ++bad.line;
-                    bad.column = 1;
-                } else {
-                    ++bad.column;
-                }
-            }
-            diagnostics.error("lexer", "illegal-byte", bad, "only printable ASCII and LF are allowed");
-            return result;
-        }
-    }
-
     std::size_t lineStart = 0;
     std::size_t checkLine = 1;
     while (lineStart < text.size()) {
@@ -193,6 +231,10 @@ LexResult lexSource(const SourceFile& source, Diagnostics& diagnostics) {
             advance();
             bool closed = false;
             while (index < text.size()) {
+                if (text[index] != '\n' && !isPrintableAscii(static_cast<unsigned char>(text[index]))) {
+                    diagnostics.error("lexer", "illegal-byte", location(), "only printable ASCII is allowed outside string literals");
+                    return result;
+                }
                 if (text[index] == '{' || text[index] == '}') {
                     diagnostics.error("lexer", "comment-brace", location(), "comments must not contain braces");
                     return result;
@@ -227,6 +269,7 @@ LexResult lexSource(const SourceFile& source, Diagnostics& diagnostics) {
                     diagnostics.error("lexer", "newline-in-string", location(), "strings cannot contain a raw newline");
                     return result;
                 }
+                const auto byte = static_cast<unsigned char>(current);
                 if (current == '"') {
                     advance();
                     closed = true;
@@ -244,6 +287,21 @@ LexResult lexSource(const SourceFile& source, Diagnostics& diagnostics) {
                     }
                     value.push_back(escaped);
                     advance();
+                    continue;
+                }
+                if (byte < 0x20U || byte == 0x7fU) {
+                    diagnostics.error("lexer", "illegal-string-byte", location(), "strings cannot contain raw control bytes");
+                    return result;
+                }
+                if (byte >= 0x80U) {
+                    std::size_t length = 0;
+                    if (!validUtf8Sequence(text, index, length)) {
+                        diagnostics.error("lexer", "bad-utf8", location(), "string literal contains invalid UTF-8");
+                        return result;
+                    }
+                    for (std::size_t i = 0; i < length; ++i) {
+                        value.push_back(advance());
+                    }
                     continue;
                 }
                 value.push_back(current);
@@ -290,10 +348,16 @@ LexResult lexSource(const SourceFile& source, Diagnostics& diagnostics) {
             return result;
         }
 
+        if (!isPrintableAscii(static_cast<unsigned char>(ch))) {
+            diagnostics.error("lexer", "illegal-byte", location(), "only printable ASCII is allowed outside string literals");
+            return result;
+        }
+
         const auto start = location();
         if (index + 1 < text.size()) {
             const std::string two{text[index], text[index + 1]};
-            if (two == "==" || two == "!=" || two == "<=" || two == ">=" || two == "&&" || two == "||") {
+            if (two == "==" || two == "!=" || two == "<=" || two == ">=" || two == "&&" || two == "||" ||
+                two == "+=" || two == "-=" || two == "*=" || two == "/=") {
                 advance();
                 advance();
                 pushToken(result.tokens, TokenKind::Symbol, two, start);

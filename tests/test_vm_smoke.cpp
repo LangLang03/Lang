@@ -10,6 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <fstream>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -22,7 +23,7 @@ function public callable returnable void main() code size 128 max stack size 64 
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local int:32 x = 41;
     assign x = compute (x + 1) with overflow trap;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain root with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain root with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )";
 
@@ -40,6 +41,20 @@ std::optional<torture::vm::BytecodeProgram> compileBytecode(std::string_view tex
         return std::nullopt;
     }
     return torture::compiler::compileToBytecode(*parsed, diagnostics);
+}
+
+std::optional<torture::SourceFile> loadGradebookFixture() {
+    const char* paths[] = {"fixtures/valid/gradebook.torture", "../fixtures/valid/gradebook.torture"};
+    for (const auto* path : paths) {
+        std::ifstream in(path);
+        if (!in) {
+            continue;
+        }
+        std::ostringstream text;
+        text << in.rdbuf();
+        return torture::SourceFile{path, text.str()};
+    }
+    return std::nullopt;
 }
 
 } // namespace
@@ -125,7 +140,7 @@ TEST_CASE("VM prints declared string literals with println", "[compiler][vm][std
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = literal "HelloWorld" } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = literal "HelloWorld" } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -156,13 +171,13 @@ class helloprinter fields 0 methods 3 authorized by root because literal "printi
     }
     method public callable returnable void print() code size 256 max stack size 128 locals 0 authorized by root requires security level 1 allowed roles admin {
         proceed verifyfunctionidentity();
-        authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with justification "print through class strategy" with arguments { value by value = literal "HelloWorld" } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+        authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print through class strategy" with arguments { value by value = literal "HelloWorld" } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     }
 }
 function public callable returnable void main() code size 512 max stack size 128 locals 1 authorized by root requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     instantiate helloprinter printer authorized by root memory readable writable from printerfactory using strategy characterstrategy injecting console because literal "main is not trusted to print without a factory strategy and injected console";
-    authorize invocation of printer.print at security level 1 with memory limit 128 with timeout 1000 with justification "delegate printing to overdesigned object" with arguments { } discarding return predictstackdepth 8 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of printer.print at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "delegate printing to overdesigned object" with arguments { } discarding return predictstackdepth 8 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -186,7 +201,7 @@ TEST_CASE("VM rejects alwaysdeny approval", "[vm]") {
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local int:32 x = 1;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain root with approval of alwaysdeny with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain root with approval of alwaysdeny with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -211,11 +226,11 @@ TEST_CASE("VM executes authorized user function calls with role checks", "[vm][s
 function public callable void printplus(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local int:32 y = compute (x + 1) with overflow trap;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    authorize invocation of printplus at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 41 } discarding return predictstackdepth 8 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of printplus at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 41 } discarding return predictstackdepth 8 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -239,13 +254,13 @@ TEST_CASE("VM executes approval functions with operator input", "[vm][approval][
 function public approval returnable readable bool:1 traderconfirm(readable char:8[] details) code size 128 max stack size 64 requires security level 1 allowed roles trader {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local bool:1 decision = false;
-    operatorinput prompt details timeout 1000 into decision;
+    operatorinput prompt details timeout 1000 into decision with io operation because literal "declared operator input";
     return decision;
 }
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles trader {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local int:32 amount = 7;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = amount } discarding return predictstackdepth 4 with authority chain trader with approval of traderconfirm with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = amount } discarding return predictstackdepth 4 with authority chain trader with approval of traderconfirm with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -268,13 +283,13 @@ TEST_CASE("VM assigns and invokes function pointers", "[vm][fptr][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable void printvalue(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose linkage scope local fptr<return:void, params:(int:32), security:1, maxstack:64, codesize:128> fp;
     authorize fptr assignment of fp to printvalue with capture { } with attest "ok" with authority chain root;
-    authorize invocation via fp at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 9 } discarding return predictstackdepth 8 nullcheck true with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation via fp at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 9 } discarding return predictstackdepth 8 nullcheck true with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -300,7 +315,7 @@ function public callable returnable void main() code size 128 max stack size 64 
     declare mutable readable writable purpose computational scope local bool:1 a = true;
     declare mutable readable writable purpose computational scope local bool:1 b = false;
     declare mutable readable writable purpose computational scope local bool:1 result = gate { wire a, b, out; xor(a, b, out); yield out; };
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = result } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = result } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -326,13 +341,13 @@ function public callable returnable void main() code size 256 max stack size 128
     declare mutable readable writable purpose computational scope local int:32 x = 0;
     while (x < 5) {
         proceed assign x = compute (x + 1) with overflow trap;
-        if (x == 3) {
+        if (x == 3) judging authorized by root because literal "continue branch is approved by loop paperwork" expects elseifs 0 else 0 {
             proceed continue;
         }
-        if (x == 4) {
+        if (x == 4) judging authorized by root because literal "break branch is approved by loop paperwork" expects elseifs 0 else 0 {
             proceed break;
         }
-        authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+        authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     }
 }
 )"};
@@ -357,8 +372,8 @@ TEST_CASE("authorized return values can be assigned", "[compiler][vm][return][sm
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local int:32 x = 0;
-    assign x = authorize invocation of inputint at security level 1 with memory limit 128 with timeout 1000 with justification "read" with arguments { } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    assign x = authorize invocation of inputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "read" with arguments { } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -383,7 +398,7 @@ function public callable returnable void main() code size 256 max stack size 128
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose storage scope local int:32 tx;
     assign tx.amount = 55;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = tx.amount } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = tx.amount } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -409,7 +424,7 @@ function public callable returnable void main() code size 256 max stack size 128
     declare mutable readable writable purpose computational scope local int:32 x = 0;
     for (; x < 1; x) {
         proceed assign x = 1;
-        authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+        authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     }
 }
 )"};
@@ -429,16 +444,105 @@ function public callable returnable void main() code size 256 max stack size 128
     CHECK(output.str() == "1\n");
 }
 
+TEST_CASE("VM runs conditional expressions, compound assignments, and proof obligations", "[vm][syntax][proof][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 512 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 x = 0;
+    declare mutable readable writable purpose computational scope local bool:1 flag = false;
+    assign x += flag ? 100 : 1;
+    if (x == 0) judging authorized by root because literal "primary arithmetic judgment has been requested" expects elseifs 1 else 1 {
+        proceed assign x += 100;
+    } else if (x == 1) judging authorized by root because literal "secondary arithmetic judgment has been requested" expects elseifs 0 else 1 {
+        proceed assign x *= 5;
+    } else judging authorized by root because literal "fallback arithmetic judgment has been requested" {
+        proceed assign x = 9;
+    }
+    prove theorem arithmeticcommittee: require (x == 5) therefore (x >= 5) because literal "the arithmetic committee accepts five as at least five";
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "5\n");
+}
+
+TEST_CASE("VM enforces loop invariants and decreasing variants", "[vm][syntax][proof][control]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 1024 max stack size 256 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 x = 0;
+    do invariant (x >= 0) because literal "x is administratively classified as nonnegative" decreases (4 - x) because literal "the remaining iteration budget must strictly descend" {
+        proceed assign x += 1;
+        if (x == 2) judging authorized by root because literal "continue judgment is part of the decreasing variant ceremony" expects elseifs 0 else 0 {
+            proceed continue;
+        }
+        authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    } until (x >= 4);
+    prove theorem finalbudget: require (x == 4) therefore (x >= 0) because literal "formal loop paperwork has reached the archive";
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "1\n3\n4\n");
+}
+
+TEST_CASE("VM runs the UTF-8 grade management ceremony", "[vm][utf8][gradebook][smoke]") {
+    auto loaded = loadGradebookFixture();
+    REQUIRE(loaded.has_value());
+    const auto& source = *loaded;
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input{"5\n2\n95\n5\n0\n"};
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str().find("语文成绩已修改") != std::string::npos);
+    CHECK(output.str().find("成绩管理系统\n学生：张三") != std::string::npos);
+    CHECK(output.str().find("270\n等级：优秀") != std::string::npos);
+    CHECK(output.str().find("273\n等级：优秀") != std::string::npos);
+    CHECK(output.str().find("成绩管理系统已退出") != std::string::npos);
+}
+
 TEST_CASE("VM grants roles through authority chains", "[vm][roles][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable void guarded(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles trader {
     proceed verifyfunctionidentity();
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain trader with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain trader with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     grant trader to desk via root;
-    authorize invocation of guarded at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 77 } discarding return predictstackdepth 4 with authority chain desk with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of guarded at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 77 } discarding return predictstackdepth 4 with authority chain desk with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -466,7 +570,7 @@ function public callable returnable void main() code size 256 max stack size 128
     proceed verifyfunctionidentity();
     grant trader to desk via root;
     revoke trader from desk;
-    authorize invocation of guarded at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 77 } discarding return predictstackdepth 4 with authority chain desk with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of guarded at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 77 } discarding return predictstackdepth 4 with authority chain desk with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -494,7 +598,7 @@ function public callable void guarded(readable int:32 x) code size 128 max stack
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     grant trader to desk via root;
-    authorize invocation of guarded at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 77 } discarding return predictstackdepth 4 with authority chain desk with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of guarded at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 77 } discarding return predictstackdepth 4 with authority chain desk with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -521,7 +625,7 @@ function public callable void guarded(readable int:32 x) where callable from bro
 }
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    authorize invocation of guarded at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 77 } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of guarded at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 77 } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -550,8 +654,8 @@ function public callable returnable readable int:32 addone(readable int:32 x) co
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local int:32 y = 0;
-    assign y = authorize invocation of addone at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 9 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    assign y = authorize invocation of addone at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 9 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -578,8 +682,8 @@ function public callable returnable readable int:32 addone(readable int:32 x) co
 }
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 y = authorize invocation of addone at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 40 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    declare mutable readable writable purpose computational scope local int:32 y = authorize invocation of addone at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 40 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -608,8 +712,8 @@ function public callable returnable void main() code size 256 max stack size 128
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose linkage scope local fptr<return:int:32, params:(int:32), security:1, maxstack:64, codesize:128> fp;
     authorize fptr assignment of fp to addone with capture { } with attest "ok" with authority chain root;
-    declare mutable readable writable purpose computational scope local int:32 y = authorize invocation via fp at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 9 } predictstackdepth 4 nullcheck true with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    declare mutable readable writable purpose computational scope local int:32 y = authorize invocation via fp at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 9 } predictstackdepth 4 nullcheck true with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -637,8 +741,8 @@ function public callable void bump(readable writable ptr<readable writable, int:
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local int:32 x = 4;
-    authorize invocation of bump at security level 1 with memory limit 128 with timeout 1000 with justification "bump" with arguments { target by reference = &x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of bump at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "bump" with arguments { target by reference = &x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -664,10 +768,10 @@ function public callable returnable void main() code size 512 max stack size 128
     declare mutable readable writable purpose computational scope local int:32 src = 77;
     declare mutable readable writable purpose computational scope local int:32 dst = 0;
     declare mutable readable writable purpose computational scope local int:32 cmp = 99;
-    authorize invocation of copymemory at security level 1 with memory limit 128 with timeout 1000 with justification "copy" with arguments { dst by reference = &dst, src by reference = &src, length by value = 1 } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    assign cmp = authorize invocation of comparememory at security level 1 with memory limit 128 with timeout 1000 with justification "compare" with arguments { left by reference = &dst, right by reference = &src, length by value = 1 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = dst } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = cmp } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of copymemory at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "copy" with arguments { dst by reference = &dst, src by reference = &src, length by value = 1 } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    assign cmp = authorize invocation of comparememory at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "compare" with arguments { left by reference = &dst, right by reference = &src, length by value = 1 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = dst } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = cmp } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -691,9 +795,9 @@ TEST_CASE("VM supports inputchar outputchar and ECC verification", "[vm][stdlib]
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose io scope local char:8 ch = 0;
-    assign ch = authorize invocation of inputchar at security level 1 with memory limit 128 with timeout 1000 with justification "read" with arguments { } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    authorize invocation of outputchar at security level 1 with memory limit 128 with timeout 1000 with justification "write" with arguments { value by value = ch } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    authorize invocation of verifymemoryintegrity at security level 1 with memory limit 128 with timeout 1000 with justification "ecc" with arguments { } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    assign ch = authorize invocation of inputchar at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "read" with arguments { } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputchar at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "write" with arguments { value by value = ch } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of verifymemoryintegrity at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "ecc" with arguments { } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -719,9 +823,9 @@ function public callable returnable void main() code size 512 max stack size 128
     declare mutable readable writable purpose computational scope local int:64 wrapped = compute (9223372036854775807 + 1) with overflow wrap;
     declare mutable readable writable purpose computational scope local int:64 saturated = compute (9223372036854775807 + 1) with overflow saturate;
     declare mutable readable writable purpose computational scope local int:64 extended = compute (9223372036854775807 + 1) with overflow extend;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = wrapped } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = saturated } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = extended } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = wrapped } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = saturated } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = extended } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -776,7 +880,7 @@ TEST_CASE("VM invokes struct methods through typed values", "[vm][struct][smoke]
         text += name;
         text += "() code size 128 max stack size 64 requires security level 1 allowed roles admin { proceed verifyfunctionidentity(); ";
         if (std::string{name} == "init") {
-            text += "authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification \"print\" with arguments { value by value = 5 } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification \"ok\" with approval timeout 1000; ";
+            text += "authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal \"declared io operation\" with justification \"print\" with arguments { value by value = 5 } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification \"ok\" with approval timeout 1000; ";
         }
         text += "}\n";
     }
@@ -784,7 +888,7 @@ TEST_CASE("VM invokes struct methods through typed values", "[vm][struct][smoke]
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose storage scope local thing tx;
-    authorize invocation of tx.init at security level 1 with memory limit 128 with timeout 1000 with justification "init" with arguments { } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of tx.init at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "init" with arguments { } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )";
 
@@ -832,8 +936,8 @@ TEST_CASE("VM lets struct methods mutate fields through self references", "[vm][
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose storage scope local record tx;
-    authorize invocation of tx.init at security level 1 with memory limit 128 with timeout 1000 with justification "init" with arguments { self by reference = &tx } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = tx.amount } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of tx.init at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "init" with arguments { self by reference = &tx } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = tx.amount } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )";
 

@@ -127,6 +127,22 @@ private:
             text == "ptr" || text == "ref" || text == "fptr" || text == "chain" || text == "void";
     }
 
+    static std::optional<std::string_view> compoundAssignmentOperator(std::string_view text) {
+        if (text == "+=") {
+            return "+";
+        }
+        if (text == "-=") {
+            return "-";
+        }
+        if (text == "*=") {
+            return "*";
+        }
+        if (text == "/=") {
+            return "/";
+        }
+        return std::nullopt;
+    }
+
     std::string parseAccessFlags() {
         std::string access;
         while (isAccessFlag(current().text)) {
@@ -424,12 +440,16 @@ private:
             statement = parseVerify();
         } else if (check("authorize")) {
             statement = parseAuthorizeCall();
+        } else if (check("prove")) {
+            statement = parseProof();
         } else if (check("operatorinput")) {
             statement = parseOperatorInput();
-        } else if (check("if")) {
+        } else if (checkConditionalStart()) {
             statement = parseIf();
         } else if (check("while")) {
             statement = parseWhile();
+        } else if (check("do")) {
+            statement = parseDoUntil();
         } else if (check("for")) {
             statement = parseFor();
         } else if (check("gate")) {
@@ -554,7 +574,27 @@ private:
         statement->assign.location = current().location;
         expect("assign", "expected assign");
         statement->assign.target = parseExpression();
-        if (!statement->assign.target || !expect("=", "expected = in assignment")) {
+        if (!statement->assign.target) {
+            return nullptr;
+        }
+        if (const auto op = compoundAssignmentOperator(current().text)) {
+            const auto opToken = current();
+            ++position_;
+            auto right = parseExpression();
+            if (!right) {
+                return nullptr;
+            }
+            auto left = cloneExpr(*statement->assign.target);
+            auto value = makeExpr(ExprKind::Binary, opToken.location, std::string{*op});
+            value->left = std::move(left);
+            value->right = std::move(right);
+            statement->assign.value = std::move(value);
+            if (!expect(";", "expected ; after compound assignment")) {
+                return nullptr;
+            }
+            return statement;
+        }
+        if (!expect("=", "expected = in assignment")) {
             return nullptr;
         }
         if (check("authorize")) {
@@ -719,6 +759,12 @@ private:
                     }
                     continue;
                 }
+                if (match("io")) {
+                    if (!parseIoClause(statement.authorizeCall.io)) {
+                        return false;
+                    }
+                    continue;
+                }
                 if (match("memory")) {
                     if (!expect("limit", "expected limit after memory")) {
                         return false;
@@ -789,8 +835,82 @@ private:
         return true;
     }
 
+    StatementPtr parseProof() {
+        auto statement = makeStatement(StatementKind::Proof, current().location);
+        statement->proof.location = current().location;
+        if (!expect("prove", "expected prove")) {
+            return nullptr;
+        }
+        auto form = expectIdentifier("expected proof form");
+        if (!form) {
+            return nullptr;
+        }
+        if (form->text != "theorem" && form->text != "axiom") {
+            error(*form, "expected-proof-form", "expected theorem or axiom after prove");
+            return nullptr;
+        }
+        statement->proof.form = form->text;
+        auto name = expectIdentifier("expected proof obligation name");
+        if (!name) {
+            return nullptr;
+        }
+        statement->proof.name = name->text;
+        if (!expect(":", "expected : after proof obligation name")) {
+            return nullptr;
+        }
+
+        if (statement->proof.form == "theorem") {
+            if (!(match("require") || match("requires"))) {
+                error(current(), "expected-proof-premise", "expected require before theorem premise");
+                return nullptr;
+            }
+            if (!expect("(", "expected ( before theorem premise")) {
+                return nullptr;
+            }
+            statement->proof.premise = parseExpression();
+            if (!statement->proof.premise || !expect(")", "expected ) after theorem premise")) {
+                return nullptr;
+            }
+            if (!(match("therefore") || match("ensures"))) {
+                error(current(), "expected-proof-claim", "expected therefore before theorem claim");
+                return nullptr;
+            }
+            if (!expect("(", "expected ( before theorem claim")) {
+                return nullptr;
+            }
+            statement->proof.claim = parseExpression();
+            if (!statement->proof.claim || !expect(")", "expected ) after theorem claim")) {
+                return nullptr;
+            }
+        } else {
+            if (!expect("assume", "expected assume before axiom claim") || !expect("(", "expected ( before axiom claim")) {
+                return nullptr;
+            }
+            statement->proof.claim = parseExpression();
+            if (!statement->proof.claim || !expect(")", "expected ) after axiom claim")) {
+                return nullptr;
+            }
+        }
+
+        statement->proof.reason = parseBecauseLiteral("proof");
+        if (!statement->proof.reason || !expect(";", "expected ; after proof obligation")) {
+            return nullptr;
+        }
+        return statement;
+    }
+
     bool isExpressionDelimiter() const {
         return check(",") || check("}") || check(")");
+    }
+
+    bool parseIoClause(IoClause& io) {
+        io.present = true;
+        io.location = previous().location;
+        if (!expect("operation", "expected operation after io")) {
+            return false;
+        }
+        io.reason = parseBecauseLiteral("io operation");
+        return io.reason != nullptr;
     }
 
     std::optional<std::string> parseQualifiedName() {
@@ -865,6 +985,15 @@ private:
             return nullptr;
         }
         statement->identifier = output->text;
+        if (match("with")) {
+            if (!match("io")) {
+                error(current(), "expected-io-clause", "expected io operation declaration after operatorinput");
+                return nullptr;
+            }
+            if (!parseIoClause(statement->io)) {
+                return nullptr;
+            }
+        }
         expect(";", "expected ; after operatorinput");
         return statement;
     }
@@ -932,17 +1061,86 @@ private:
 
     StatementPtr parseIf() {
         auto statement = makeStatement(StatementKind::If, current().location);
-        expect("if", "expected if");
-        expect("(", "expected ( after if");
+        if (!parseConditionalPreamble()) {
+            return nullptr;
+        }
         statement->expression = parseExpression();
         if (!statement->expression || !expect(")", "expected ) after if condition")) {
             return nullptr;
         }
+        if (!parseJudgmentClause(statement->judgment, true)) {
+            return nullptr;
+        }
         statement->thenBody = parseBlock();
         if (match("else")) {
-            statement->elseBody = parseBlock();
+            if (checkConditionalStart()) {
+                statement->elseBody.push_back(parseIf());
+                if (!statement->elseBody.back()) {
+                    return nullptr;
+                }
+            } else {
+                if (!parseJudgmentClause(statement->elseJudgment, false)) {
+                    return nullptr;
+                }
+                statement->elseBody = parseBlock();
+            }
         }
         return statement;
+    }
+
+    bool checkConditionalStart() const {
+        return check("if") || check("convene");
+    }
+
+    bool parseConditionalPreamble() {
+        if (match("if")) {
+            return expect("(", "expected ( after if");
+        }
+        if (match("convene")) {
+            return expect("conditional", "expected conditional after convene") &&
+                expect("tribunal", "expected tribunal after convene conditional") &&
+                expect("over", "expected over after convene conditional tribunal") &&
+                expect("(", "expected ( after convene conditional tribunal over");
+        }
+        error(current(), "expected-conditional-start", "expected conditional tribunal");
+        return false;
+    }
+
+    bool parseJudgmentClause(JudgmentClause& judgment, bool requireCounts) {
+        judgment.location = current().location;
+        judgment.present = true;
+        if (!expect("judging", "expected judging clause before conditional block")) {
+            return false;
+        }
+        if (!expect("authorized", "expected authorized in judging clause") || !expect("by", "expected by in judging clause")) {
+            return false;
+        }
+        auto authority = expectIdentifier("expected judging authority");
+        if (!authority) {
+            return false;
+        }
+        judgment.authority = authority->text;
+        judgment.reason = parseBecauseLiteral("judgment");
+        if (!judgment.reason) {
+            return false;
+        }
+        if (!requireCounts) {
+            return true;
+        }
+        if (!expect("expects", "expected expects in judging clause")) {
+            return false;
+        }
+        if (!match("elseifs") && !match("appealroutes")) {
+            error(current(), "expected-elseif-count-label", "expected elseifs or appealroutes count in judging clause");
+            return false;
+        }
+        judgment.declaredElseIfCount = parseRequiredNumber("expected declared else-if count");
+        if (!match("else") && !match("defaultdockets")) {
+            error(current(), "expected-else-count-label", "expected else or defaultdockets count in judging clause");
+            return false;
+        }
+        judgment.declaredElseCount = parseRequiredNumber("expected declared else count");
+        return true;
     }
 
     StatementPtr parseWhile() {
@@ -953,7 +1151,28 @@ private:
         if (!statement->expression || !expect(")", "expected ) after while condition")) {
             return nullptr;
         }
+        if (!parseFormalClauses(*statement)) {
+            return nullptr;
+        }
         statement->thenBody = parseBlock();
+        return statement;
+    }
+
+    StatementPtr parseDoUntil() {
+        auto statement = makeStatement(StatementKind::DoUntil, current().location);
+        expect("do", "expected do");
+        if (!parseFormalClauses(*statement)) {
+            return nullptr;
+        }
+        statement->thenBody = parseBlock();
+        if (!expect("until", "expected until after do block") || !expect("(", "expected ( after until")) {
+            return nullptr;
+        }
+        statement->expression = parseExpression();
+        if (!statement->expression || !expect(")", "expected ) after until condition") ||
+            !expect(";", "expected ; after do until")) {
+            return nullptr;
+        }
         return statement;
     }
 
@@ -988,8 +1207,33 @@ private:
         if (!expect(")", "expected ) after for clauses")) {
             return nullptr;
         }
+        if (!parseFormalClauses(*statement)) {
+            return nullptr;
+        }
         statement->thenBody = parseBlock();
         return statement;
+    }
+
+    bool parseFormalClauses(Statement& statement) {
+        while (check("invariant") || check("decreases")) {
+            FormalClause clause;
+            clause.location = current().location;
+            clause.kind = current().text;
+            ++position_;
+            if (!expect("(", "expected ( before formal clause expression")) {
+                return false;
+            }
+            clause.expression = parseExpression();
+            if (!clause.expression || !expect(")", "expected ) after formal clause expression")) {
+                return false;
+            }
+            clause.reason = parseBecauseLiteral("formal clause");
+            if (!clause.reason) {
+                return false;
+            }
+            statement.formalClauses.push_back(std::move(clause));
+        }
+        return true;
     }
 
     StatementPtr parseRoleStmt() {
@@ -1116,7 +1360,28 @@ private:
         if (check("gate")) {
             return parseGateExpr();
         }
-        return parseLogicalOr();
+        return parseConditional();
+    }
+
+    ExprPtr parseConditional() {
+        auto condition = parseLogicalOr();
+        if (!condition || !match("?")) {
+            return condition;
+        }
+        const auto start = previous().location;
+        auto whenTrue = parseExpression();
+        if (!whenTrue || !expect(":", "expected : in conditional expression")) {
+            return nullptr;
+        }
+        auto whenFalse = parseConditional();
+        if (!whenFalse) {
+            return nullptr;
+        }
+        auto expr = makeExpr(ExprKind::Conditional, start);
+        expr->left = std::move(condition);
+        expr->right = std::move(whenTrue);
+        expr->third = std::move(whenFalse);
+        return expr;
     }
 
     ExprPtr parseLogicalOr() {

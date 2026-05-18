@@ -7,8 +7,10 @@
 #include <charconv>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace torture::compiler {
@@ -45,27 +47,98 @@ bool isOneOf(const std::string& value, std::initializer_list<const char*> option
     return std::find(options.begin(), options.end(), value) != options.end();
 }
 
-bool isValidType(const TypeName& type, const std::unordered_set<std::string>& structNames, bool allowVoid) {
-    const auto text = normalized(type.text);
-    if (allowVoid && text == vm::source_literal::kVoidType) {
+std::optional<std::string> between(const std::string& text, const std::string& prefix, const std::string& suffix);
+
+std::vector<std::string> splitTopLevel(std::string_view text, char delimiter) {
+    std::vector<std::string> out;
+    std::size_t start = 0;
+    int angleDepth = 0;
+    int parenDepth = 0;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '<') {
+            ++angleDepth;
+        } else if (text[i] == '>') {
+            --angleDepth;
+        } else if (text[i] == '(') {
+            ++parenDepth;
+        } else if (text[i] == ')') {
+            --parenDepth;
+        } else if (text[i] == delimiter && angleDepth == 0 && parenDepth == 0) {
+            out.emplace_back(text.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    out.emplace_back(text.substr(start));
+    return out;
+}
+
+bool isPrimitiveOrBuiltinType(const std::string& text) {
+    return isOneOf(text, {"int:8", "int:16", "int:32", "int:64", "uint:8", "uint:16", "uint:32", "uint:64",
+        "float:32", "float:64", "char:8", "char:32", "char:8[]", "char:32[]", "bool:1", "chain"});
+}
+
+bool isAccessType(const std::string& text) {
+    return isOneOf(text, {"readable", "writable", "readablewritable", "writablereadable"});
+}
+
+std::optional<std::pair<std::string, std::string>> pointerTypeParts(const std::string& text) {
+    std::string_view prefix;
+    if (text.starts_with("ptr<")) {
+        prefix = "ptr<";
+    } else if (text.starts_with("ref<")) {
+        prefix = "ref<";
+    } else {
+        return std::nullopt;
+    }
+    if (!text.ends_with(">")) {
+        return std::nullopt;
+    }
+    const auto inner = std::string_view{text}.substr(prefix.size(), text.size() - prefix.size() - 1);
+    const auto parts = splitTopLevel(inner, ',');
+    if (parts.size() != 2 || parts[0].empty() || parts[1].empty()) {
+        return std::nullopt;
+    }
+    return std::make_pair(parts[0], parts[1]);
+}
+
+bool isPointerLikeType(const std::string& text) {
+    return (text.starts_with("ptr<") || text.starts_with("ref<")) && text.ends_with(">");
+}
+
+bool isValidTypeText(const std::string& text, const std::unordered_set<std::string>& structNames, bool allowVoid) {
+    const auto value = normalized(text);
+    if (allowVoid && value == vm::source_literal::kVoidType) {
         return true;
     }
-    if (isOneOf(text, {"int:8", "int:16", "int:32", "int:64", "uint:8", "uint:16", "uint:32", "uint:64",
-            "float:32", "float:64", "char:8", "char:32", "char:8[]", "char:32[]", "bool:1", "chain"})) {
+    if (isPrimitiveOrBuiltinType(value)) {
         return true;
     }
-    if (structNames.contains(text)) {
+    if (structNames.contains(value)) {
         return true;
     }
-    if ((text.starts_with("ptr<") || text.starts_with("ref<")) && text.ends_with(">") && text.find(',') != std::string::npos) {
-        return true;
+    if (const auto pointer = pointerTypeParts(value)) {
+        return isAccessType(pointer->first) && isValidTypeText(pointer->second, structNames, false);
     }
-    if (text.starts_with("fptr<") && text.ends_with(">") && text.find("return:") != std::string::npos &&
-        text.find("params:") != std::string::npos && text.find("security:") != std::string::npos &&
-        text.find("maxstack:") != std::string::npos && text.find("codesize:") != std::string::npos) {
+    if (value.starts_with("fptr<") && value.ends_with(">") && value.find("return:") != std::string::npos &&
+        value.find("params:") != std::string::npos && value.find("security:") != std::string::npos &&
+        value.find("maxstack:") != std::string::npos && value.find("codesize:") != std::string::npos) {
+        const auto returnType = between(value, "return:", ",params:");
+        const auto params = between(value, "params:(", "),security:");
+        if (!returnType || !params || !isValidTypeText(*returnType, structNames, true)) {
+            return false;
+        }
+        for (const auto& param : splitTopLevel(*params, ',')) {
+            if (!param.empty() && !isValidTypeText(param, structNames, false)) {
+                return false;
+            }
+        }
         return true;
     }
     return false;
+}
+
+bool isValidType(const TypeName& type, const std::unordered_set<std::string>& structNames, bool allowVoid) {
+    return isValidTypeText(type.text, structNames, allowVoid);
 }
 
 std::optional<std::string> between(const std::string& text, const std::string& prefix, const std::string& suffix) {
@@ -88,20 +161,10 @@ int parseSmallInt(std::string text) {
 }
 
 std::vector<std::string> splitParams(std::string text) {
-    std::vector<std::string> out;
     if (text.empty()) {
-        return out;
+        return {};
     }
-    std::size_t start = 0;
-    while (start <= text.size()) {
-        const auto comma = text.find(',', start);
-        out.push_back(text.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
-        if (comma == std::string::npos) {
-            break;
-        }
-        start = comma + 1;
-    }
-    return out;
+    return splitTopLevel(text, ',');
 }
 
 bool checkFptrMatches(
@@ -302,6 +365,15 @@ std::optional<std::string> inferExprType(
             return "bool:1";
         }
         return inferExprType(expr->left.get(), locals, functions, structFields).value_or("int:64");
+    case ExprKind::Conditional:
+        {
+            const auto trueType = inferExprType(expr->right.get(), locals, functions, structFields);
+            const auto falseType = inferExprType(expr->third.get(), locals, functions, structFields);
+            if (trueType && falseType && isTypeCompatible(*trueType, *falseType)) {
+                return *trueType;
+            }
+            return trueType ? trueType : falseType;
+        }
     case ExprKind::Compute:
         return inferExprType(expr->left.get(), locals, functions, structFields);
     case ExprKind::Gate:
@@ -325,6 +397,198 @@ std::string resolveCallTarget(const std::string& target, const std::unordered_ma
     return target;
 }
 
+enum class ScalarKind {
+    SignedInteger,
+    UnsignedInteger,
+    Float,
+    Character,
+    Boolean,
+};
+
+struct ScalarInfo {
+    ScalarKind kind;
+    int width = 0;
+};
+
+std::optional<int> widthAfterPrefix(std::string_view text, std::string_view prefix) {
+    if (!text.starts_with(prefix)) {
+        return std::nullopt;
+    }
+    const auto width = text.substr(prefix.size());
+    if (width.empty() || !std::all_of(width.begin(), width.end(), [](char ch) {
+            return ch >= '0' && ch <= '9';
+        })) {
+        return std::nullopt;
+    }
+    return parseSmallInt(std::string{width});
+}
+
+std::optional<ScalarInfo> scalarInfo(const std::string& rawType) {
+    const auto type = normalized(rawType);
+    if (type.ends_with("[]")) {
+        return std::nullopt;
+    }
+    if (const auto width = widthAfterPrefix(type, "int:")) {
+        return ScalarInfo{ScalarKind::SignedInteger, *width};
+    }
+    if (const auto width = widthAfterPrefix(type, "uint:")) {
+        return ScalarInfo{ScalarKind::UnsignedInteger, *width};
+    }
+    if (const auto width = widthAfterPrefix(type, "float:")) {
+        return ScalarInfo{ScalarKind::Float, *width};
+    }
+    if (const auto width = widthAfterPrefix(type, "char:")) {
+        return ScalarInfo{ScalarKind::Character, *width};
+    }
+    if (type == "bool:1") {
+        return ScalarInfo{ScalarKind::Boolean, 1};
+    }
+    return std::nullopt;
+}
+
+bool isArithmeticScalar(const ScalarInfo& info) {
+    return info.kind == ScalarKind::SignedInteger || info.kind == ScalarKind::UnsignedInteger || info.kind == ScalarKind::Float;
+}
+
+bool isEqualityOperator(const std::string& op) {
+    return op == "==" || op == "!=";
+}
+
+bool isComparisonOperator(const std::string& op) {
+    return isEqualityOperator(op) || op == "<" || op == ">" || op == "<=" || op == ">=";
+}
+
+bool isDirectStructValue(const std::string& type, const std::unordered_set<std::string>& structNames) {
+    return structNames.contains(normalized(type));
+}
+
+bool checkComparisonRule(
+    const Expr& expr,
+    const std::unordered_map<std::string, LocalInfo>& locals,
+    const std::unordered_map<std::string, FunctionInfo>& functions,
+    const StructFieldMap& structFields,
+    const std::unordered_set<std::string>& structNames,
+    Diagnostics& diagnostics) {
+    if (expr.kind != ExprKind::Binary || !isComparisonOperator(expr.text)) {
+        return true;
+    }
+
+    const auto leftType = inferExprType(expr.left.get(), locals, &functions, &structFields);
+    const auto rightType = inferExprType(expr.right.get(), locals, &functions, &structFields);
+    if (!leftType || !rightType) {
+        return true;
+    }
+
+    const auto left = normalized(*leftType);
+    const auto right = normalized(*rightType);
+    const bool equality = isEqualityOperator(expr.text);
+    if (isDirectStructValue(left, structNames) || isDirectStructValue(right, structNames)) {
+        diagnostics.error(
+            "sema",
+            "struct-comparison-requires-method",
+            expr.location,
+            "struct values cannot be compared with operators; call compare or equals through authorization");
+        return false;
+    }
+
+    if (isPointerLikeType(left) || isPointerLikeType(right)) {
+        if (!equality) {
+            diagnostics.error("sema", "pointer-order-comparison", expr.location, "pointers and references only support == and !=");
+            return false;
+        }
+        if (!isPointerLikeType(left) || !isPointerLikeType(right) || left != right) {
+            diagnostics.error(
+                "sema",
+                "pointer-comparison-type-mismatch",
+                expr.location,
+                "pointer/reference comparisons require identical pointer kind, access permissions, and target type");
+            return false;
+        }
+        return true;
+    }
+
+    const auto leftScalar = scalarInfo(left);
+    const auto rightScalar = scalarInfo(right);
+    if (!leftScalar || !rightScalar) {
+        diagnostics.error(
+            "sema",
+            "comparison-type-mismatch",
+            expr.location,
+            "comparison operands must be compatible numeric, character, boolean, or pointer/reference types");
+        return false;
+    }
+
+    const bool leftLiteral = expr.left && expr.left->kind == ExprKind::Integer;
+    const bool rightLiteral = expr.right && expr.right->kind == ExprKind::Integer;
+    if ((leftLiteral && isArithmeticScalar(*rightScalar)) || (rightLiteral && isArithmeticScalar(*leftScalar))) {
+        return true;
+    }
+
+    if (leftScalar->kind == ScalarKind::Boolean || rightScalar->kind == ScalarKind::Boolean) {
+        if (leftScalar->kind == ScalarKind::Boolean && rightScalar->kind == ScalarKind::Boolean) {
+            if (equality) {
+                return true;
+            }
+            diagnostics.error("sema", "bool-order-comparison", expr.location, "bool:1 only supports == and !=");
+            return false;
+        }
+        diagnostics.error("sema", "comparison-type-mismatch", expr.location, "bool:1 can only be compared with bool:1");
+        return false;
+    }
+
+    if (isArithmeticScalar(*leftScalar) && isArithmeticScalar(*rightScalar)) {
+        if (leftScalar->width != rightScalar->width) {
+            diagnostics.error(
+                "sema",
+                "comparison-width-mismatch",
+                expr.location,
+                "numeric comparisons require identical bit widths");
+            return false;
+        }
+        return true;
+    }
+
+    if (leftScalar->kind == ScalarKind::Character && rightScalar->kind == ScalarKind::Character) {
+        if (leftScalar->width != rightScalar->width) {
+            diagnostics.error(
+                "sema",
+                "comparison-width-mismatch",
+                expr.location,
+                "character comparisons require identical bit widths");
+            return false;
+        }
+        return true;
+    }
+
+    diagnostics.error(
+        "sema",
+        "comparison-type-mismatch",
+        expr.location,
+        "comparison operands use incompatible type categories");
+    return false;
+}
+
+bool checkComparisonTypes(
+    const Expr* expr,
+    const std::unordered_map<std::string, LocalInfo>& locals,
+    const std::unordered_map<std::string, FunctionInfo>& functions,
+    const StructFieldMap& structFields,
+    const std::unordered_set<std::string>& structNames,
+    Diagnostics& diagnostics) {
+    if (expr == nullptr) {
+        return true;
+    }
+    bool ok = true;
+    ok = checkComparisonTypes(expr->left.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+    ok = checkComparisonTypes(expr->right.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+    ok = checkComparisonTypes(expr->third.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+    ok = checkComparisonRule(*expr, locals, functions, structFields, structNames, diagnostics) && ok;
+    for (const auto& arg : expr->authorizeCall.arguments) {
+        ok = checkComparisonTypes(arg.value.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+    }
+    return ok;
+}
+
 bool isVerify(const StatementPtr& statement) {
     return statement && statement->kind == StatementKind::VerifyFunctionIdentity;
 }
@@ -336,7 +600,7 @@ bool exprContainsCall(const Expr* expr) {
     if (expr->kind == ExprKind::AuthorizeCall) {
         return true;
     }
-    if (exprContainsCall(expr->left.get()) || exprContainsCall(expr->right.get())) {
+    if (exprContainsCall(expr->left.get()) || exprContainsCall(expr->right.get()) || exprContainsCall(expr->third.get())) {
         return true;
     }
     for (const auto& arg : expr->authorizeCall.arguments) {
@@ -354,6 +618,15 @@ bool bodyContainsCall(const std::vector<StatementPtr>& body) {
         }
         if (statement->kind == StatementKind::AuthorizeCall || statement->kind == StatementKind::AssignFromCall) {
             return true;
+        }
+        if (statement->kind == StatementKind::Proof &&
+            (exprContainsCall(statement->proof.premise.get()) || exprContainsCall(statement->proof.claim.get()))) {
+            return true;
+        }
+        for (const auto& clause : statement->formalClauses) {
+            if (exprContainsCall(clause.expression.get())) {
+                return true;
+            }
         }
         if (exprContainsCall(statement->expression.get()) || exprContainsCall(statement->initializer.get()) ||
             exprContainsCall(statement->increment.get()) || exprContainsCall(statement->assign.value.get())) {
@@ -434,6 +707,116 @@ bool isDeclaredLiteralExpr(const Expr* expr) {
     return expr != nullptr && expr->kind == ExprKind::String && expr->declaredLiteral && !expr->text.empty();
 }
 
+const Statement* elseIfStatement(const Statement& statement) {
+    if (statement.elseBody.size() == 1 && statement.elseBody.front() &&
+        statement.elseBody.front()->kind == StatementKind::If) {
+        return statement.elseBody.front().get();
+    }
+    return nullptr;
+}
+
+int actualElseIfCount(const Statement& statement) {
+    if (const auto* child = elseIfStatement(statement)) {
+        return 1 + actualElseIfCount(*child);
+    }
+    return 0;
+}
+
+int actualElseCount(const Statement& statement) {
+    if (statement.elseBody.empty()) {
+        return 0;
+    }
+    if (const auto* child = elseIfStatement(statement)) {
+        return actualElseCount(*child);
+    }
+    return 1;
+}
+
+bool checkJudgmentBureaucracy(const Statement& statement, Diagnostics& diagnostics) {
+    if (statement.kind != StatementKind::If) {
+        return true;
+    }
+
+    bool ok = true;
+    if (!statement.judgment.present) {
+        diagnostics.error("sema", "missing-judgment-clause", statement.location, "conditional judgment requires an explicit judging clause");
+        return false;
+    }
+    if (statement.judgment.authority.empty()) {
+        diagnostics.error("sema", "missing-judgment-authority", statement.location, "conditional judgment must name who authorized it");
+        ok = false;
+    }
+    if (!isDeclaredLiteralExpr(statement.judgment.reason.get())) {
+        diagnostics.error("sema", "missing-judgment-reason", statement.location, "conditional judgment must explain why using because literal \"...\"");
+        ok = false;
+    }
+
+    const auto actualElseIfs = actualElseIfCount(statement);
+    const auto actualElses = actualElseCount(statement);
+    if (statement.judgment.declaredElseIfCount != actualElseIfs) {
+        diagnostics.error(
+            "sema",
+            "elseif-count-mismatch",
+            statement.location,
+            "judging clause declared " + std::to_string(statement.judgment.declaredElseIfCount) +
+                " else-if branches but the conditional has " + std::to_string(actualElseIfs));
+        ok = false;
+    }
+    if (statement.judgment.declaredElseCount != actualElses) {
+        diagnostics.error(
+            "sema",
+            "else-count-mismatch",
+            statement.location,
+            "judging clause declared " + std::to_string(statement.judgment.declaredElseCount) +
+                " else branches but the conditional has " + std::to_string(actualElses));
+        ok = false;
+    }
+
+    if (!statement.elseBody.empty() && elseIfStatement(statement) == nullptr) {
+        if (!statement.elseJudgment.present) {
+            diagnostics.error("sema", "missing-else-judgment-clause", statement.location, "else branch must name its judging authority");
+            ok = false;
+        } else {
+            if (statement.elseJudgment.authority.empty()) {
+                diagnostics.error("sema", "missing-else-judgment-authority", statement.elseJudgment.location, "else branch must name who authorized it");
+                ok = false;
+            }
+            if (!isDeclaredLiteralExpr(statement.elseJudgment.reason.get())) {
+                diagnostics.error("sema", "missing-else-judgment-reason", statement.elseJudgment.location, "else branch must explain why using because literal \"...\"");
+                ok = false;
+            }
+        }
+    }
+
+    return ok;
+}
+
+bool isIoBuiltinTarget(const std::string& target) {
+    return target == vm::builtin::kOutputInt || target == vm::builtin::kOutputChar ||
+        target == vm::builtin::kPrintLine || target == vm::builtin::kInputInt ||
+        target == vm::builtin::kInputChar;
+}
+
+bool checkIoDeclaration(const IoClause& io, const SourceLocation& location, Diagnostics& diagnostics, std::string_view operation) {
+    if (!io.present) {
+        diagnostics.error(
+            "sema",
+            "missing-io-declaration",
+            location,
+            std::string(operation) + " must explicitly declare with io operation because literal \"...\"");
+        return false;
+    }
+    if (!isDeclaredLiteralExpr(io.reason.get())) {
+        diagnostics.error(
+            "sema",
+            "missing-io-reason",
+            io.location,
+            std::string(operation) + " must explain the IO operation using because literal \"...\"");
+        return false;
+    }
+    return true;
+}
+
 bool checkExprReads(const Expr* expr, Diagnostics& diagnostics, const std::unordered_map<std::string, LocalInfo>& locals) {
     if (expr == nullptr) {
         return true;
@@ -462,6 +845,7 @@ bool checkExprReads(const Expr* expr, Diagnostics& diagnostics, const std::unord
     }
     ok = checkExprReads(expr->left.get(), diagnostics, locals) && ok;
     ok = checkExprReads(expr->right.get(), diagnostics, locals) && ok;
+    ok = checkExprReads(expr->third.get(), diagnostics, locals) && ok;
     return ok;
 }
 
@@ -472,7 +856,8 @@ bool checkImmutableAssignments(
     std::unordered_map<std::string, LocalInfo>& locals,
     const std::unordered_set<std::string>& structNames,
     const std::unordered_set<std::string>& classNames,
-    const std::unordered_map<std::string, FunctionInfo>& functions) {
+    const std::unordered_map<std::string, FunctionInfo>& functions,
+    const StructFieldMap& structFields) {
     bool ok = true;
     for (const auto& statement : body) {
         if (!statement) {
@@ -612,6 +997,7 @@ bool checkImmutableAssignments(
             }
         }
         if (statement->kind == StatementKind::OperatorInput) {
+            ok = checkIoDeclaration(statement->io, statement->location, diagnostics, "operatorinput") && ok;
             if (function.category != FunctionCategory::Approval) {
                 diagnostics.error(
                     "sema",
@@ -647,7 +1033,34 @@ bool checkImmutableAssignments(
         if (statement->kind == StatementKind::Return) {
             ok = checkExprReads(statement->expression.get(), diagnostics, locals) && ok;
         }
-        if (statement->kind == StatementKind::If || statement->kind == StatementKind::While) {
+        if (statement->kind == StatementKind::If) {
+            ok = checkJudgmentBureaucracy(*statement, diagnostics) && ok;
+        }
+        if (statement->kind == StatementKind::Proof) {
+            ok = checkExprReads(statement->proof.premise.get(), diagnostics, locals) && ok;
+            ok = checkExprReads(statement->proof.claim.get(), diagnostics, locals) && ok;
+            if (!isDeclaredLiteralExpr(statement->proof.reason.get())) {
+                diagnostics.error(
+                    "sema",
+                    "missing-proof-reason",
+                    statement->location,
+                    "proof obligations must explain themselves using because literal \"...\"");
+                ok = false;
+            }
+        }
+        for (const auto& clause : statement->formalClauses) {
+            ok = checkExprReads(clause.expression.get(), diagnostics, locals) && ok;
+            if (!isDeclaredLiteralExpr(clause.reason.get())) {
+                diagnostics.error(
+                    "sema",
+                    "missing-formal-clause-reason",
+                    clause.location,
+                    "formal clauses must explain themselves using because literal \"...\"");
+                ok = false;
+            }
+        }
+        if (statement->kind == StatementKind::If || statement->kind == StatementKind::While ||
+            statement->kind == StatementKind::DoUntil) {
             ok = checkExprReads(statement->expression.get(), diagnostics, locals) && ok;
         }
         if (statement->kind == StatementKind::For) {
@@ -674,8 +1087,27 @@ bool checkImmutableAssignments(
                 ok = checkFptrMatches(local->second.type, target->second, statement->location, diagnostics) && ok;
             }
         }
-        ok = checkImmutableAssignments(function, statement->thenBody, diagnostics, locals, structNames, classNames, functions) && ok;
-        ok = checkImmutableAssignments(function, statement->elseBody, diagnostics, locals, structNames, classNames, functions) && ok;
+        ok = checkComparisonTypes(statement->expression.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+        ok = checkComparisonTypes(statement->initializer.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+        ok = checkComparisonTypes(statement->increment.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+        ok = checkComparisonTypes(statement->assign.value.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+        if (statement->kind == StatementKind::VarDecl) {
+            ok = checkComparisonTypes(statement->varDecl.initializer.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+        }
+        if (statement->kind == StatementKind::Proof) {
+            ok = checkComparisonTypes(statement->proof.premise.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+            ok = checkComparisonTypes(statement->proof.claim.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+        }
+        for (const auto& clause : statement->formalClauses) {
+            ok = checkComparisonTypes(clause.expression.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+        }
+        if (statement->kind == StatementKind::AuthorizeCall || statement->kind == StatementKind::AssignFromCall) {
+            for (const auto& arg : statement->authorizeCall.arguments) {
+                ok = checkComparisonTypes(arg.value.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+            }
+        }
+        ok = checkImmutableAssignments(function, statement->thenBody, diagnostics, locals, structNames, classNames, functions, structFields) && ok;
+        ok = checkImmutableAssignments(function, statement->elseBody, diagnostics, locals, structNames, classNames, functions, structFields) && ok;
     }
     return ok;
 }
@@ -782,6 +1214,9 @@ bool checkAuthorizeCall(
         diagnostics.error("sema", "unknown-call-target", location, "unknown call target '" + resolvedTarget + "'");
         return false;
     }
+    if (isIoBuiltinTarget(resolvedTarget)) {
+        ok = checkIoDeclaration(call.io, location, diagnostics, "authorized IO invocation") && ok;
+    }
     if (resolvedTarget == vm::builtin::kPrintLine) {
         if (call.arguments.empty() || !isDeclaredLiteralExpr(call.arguments.front().value.get(), locals)) {
             diagnostics.error(
@@ -851,6 +1286,7 @@ bool checkExpressionCalls(
     }
     ok = checkExpressionCalls(function, expr->left.get(), diagnostics, functions, locals, structFields) && ok;
     ok = checkExpressionCalls(function, expr->right.get(), diagnostics, functions, locals, structFields) && ok;
+    ok = checkExpressionCalls(function, expr->third.get(), diagnostics, functions, locals, structFields) && ok;
     return ok;
 }
 
@@ -886,6 +1322,13 @@ bool checkCalls(
         ok = checkExpressionCalls(function, statement->initializer.get(), diagnostics, functions, locals, structFields) && ok;
         ok = checkExpressionCalls(function, statement->increment.get(), diagnostics, functions, locals, structFields) && ok;
         ok = checkExpressionCalls(function, statement->assign.value.get(), diagnostics, functions, locals, structFields) && ok;
+        if (statement->kind == StatementKind::Proof) {
+            ok = checkExpressionCalls(function, statement->proof.premise.get(), diagnostics, functions, locals, structFields) && ok;
+            ok = checkExpressionCalls(function, statement->proof.claim.get(), diagnostics, functions, locals, structFields) && ok;
+        }
+        for (const auto& clause : statement->formalClauses) {
+            ok = checkExpressionCalls(function, clause.expression.get(), diagnostics, functions, locals, structFields) && ok;
+        }
         if (statement->kind == StatementKind::VarDecl) {
             ok = checkExpressionCalls(function, statement->varDecl.initializer.get(), diagnostics, functions, locals, structFields) && ok;
         }
@@ -1179,7 +1622,7 @@ bool checkProgramSemantics(const Program& program, Diagnostics& diagnostics) {
         for (const auto& param : function.params) {
             locals[param.name] = LocalInfo{false, param.type.text, param.access, std::string{vm::source_literal::kComputational}, false};
         }
-        ok = checkImmutableAssignments(function, function.body, diagnostics, locals, structNames, classNames, functions) && ok;
+        ok = checkImmutableAssignments(function, function.body, diagnostics, locals, structNames, classNames, functions, structFields) && ok;
         ok = checkCalls(function, function.body, diagnostics, functions, locals, structFields) && ok;
     }
 
@@ -1248,7 +1691,7 @@ bool checkProgramSemantics(const Program& program, Diagnostics& diagnostics) {
             for (const auto& param : method.params) {
                 locals[param.name] = LocalInfo{false, param.type.text, param.access, std::string{vm::source_literal::kComputational}, false};
             }
-            ok = checkImmutableAssignments(method, method.body, diagnostics, locals, structNames, classNames, functions) && ok;
+            ok = checkImmutableAssignments(method, method.body, diagnostics, locals, structNames, classNames, functions, structFields) && ok;
             ok = checkCalls(method, method.body, diagnostics, functions, locals, structFields) && ok;
         }
         if (structure.isClass) {

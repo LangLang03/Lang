@@ -5,7 +5,7 @@
 #include <string_view>
 
 #ifndef TORTURE_BYTECODE_FORMAT_VERSION
-#define TORTURE_BYTECODE_FORMAT_VERSION 2
+#define TORTURE_BYTECODE_FORMAT_VERSION 3
 #endif
 
 namespace torture::vm::bytecode_format {

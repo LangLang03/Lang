@@ -549,6 +549,12 @@ private:
                     throw std::runtime_error("null function pointer '" + instruction.args.at(0) + "'");
                 }
                 ++pc;
+            } else if (op == opcodeName(Opcode::kAssert)) {
+                if (!asBool(pop(stack))) {
+                    const auto label = instruction.args.empty() ? std::string{"anonymous obligation"} : instruction.args.front();
+                    throw std::runtime_error("proof obligation failed: " + label);
+                }
+                ++pc;
             } else if (op == opcodeName(Opcode::kCall)) {
                 const auto* target = findFunction(program_, instruction.args.at(0));
                 if (target == nullptr) {

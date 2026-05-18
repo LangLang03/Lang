@@ -9,11 +9,11 @@ class helloprinter fields 0 methods 3 authorized by root because literal "printi
     }
     method public callable returnable void print() code size 256 max stack size 128 locals 0 authorized by root requires security level 1 allowed roles admin {
         proceed verifyfunctionidentity();
-        authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with justification "print through class strategy" with arguments { value by value = literal "HelloWorld" } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+        authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print through class strategy" with arguments { value by value = literal "HelloWorld" } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     }
 }
 function public callable returnable void main() code size 512 max stack size 128 locals 1 authorized by root requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     instantiate helloprinter printer authorized by root memory readable writable from printerfactory using strategy characterstrategy injecting console because literal "main is not trusted to print without a factory strategy and injected console";
-    authorize invocation of printer.print at security level 1 with memory limit 128 with timeout 1000 with justification "delegate printing to overdesigned object" with arguments { } discarding return predictstackdepth 8 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of printer.print at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "delegate printing to overdesigned object" with arguments { } discarding return predictstackdepth 8 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }

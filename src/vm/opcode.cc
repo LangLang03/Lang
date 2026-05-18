@@ -64,6 +64,7 @@ constexpr auto kOpcodeDescriptors = std::to_array<OpcodeDescriptor>({
     {Opcode::kCheckRole, "CHECKROLE"},
     {Opcode::kCheckRoleIndirect, "CHECKROLEIND"},
     {Opcode::kNullCheck, "NULLCHECK"},
+    {Opcode::kAssert, "ASSERT"},
     {Opcode::kCall, "CALL"},
     {Opcode::kCallIndirect, "CALLIND"},
     {Opcode::kOutputInt, "OUTPUTINT"},

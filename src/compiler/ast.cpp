@@ -19,6 +19,11 @@ AuthorizeCall cloneCall(const AuthorizeCall& call) {
     copy.approvalTimeout = call.approvalTimeout;
     copy.authorityChain = call.authorityChain;
     copy.approvalFunction = call.approvalFunction;
+    copy.io.present = call.io.present;
+    copy.io.location = call.io.location;
+    if (call.io.reason) {
+        copy.io.reason = cloneExpr(*call.io.reason);
+    }
     copy.location = call.location;
     copy.arguments.reserve(call.arguments.size());
     for (const auto& arg : call.arguments) {
@@ -54,6 +59,9 @@ ExprPtr cloneExpr(const Expr& expr) {
     }
     if (expr.right) {
         copy->right = cloneExpr(*expr.right);
+    }
+    if (expr.third) {
+        copy->third = cloneExpr(*expr.third);
     }
     return copy;
 }
