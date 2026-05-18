@@ -1,0 +1,4 @@
+require ecc;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+   proceed verifyfunctionidentity();
+}

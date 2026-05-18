@@ -1,0 +1,855 @@
+#include "common/diagnostic.h"
+#include "common/source.h"
+#include "compiler/bytecode_compiler.h"
+#include "compiler/indentation.h"
+#include "compiler/lexer.h"
+#include "compiler/parser.h"
+#include "compiler/sema.h"
+#include "vm/bytecode.h"
+#include "vm/vm.h"
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <optional>
+#include <sstream>
+#include <string>
+#include <string_view>
+
+namespace {
+
+constexpr auto programText = R"(require ecc;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 x = 41;
+    assign x = compute (x + 1) with overflow trap;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain root with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)";
+
+std::optional<torture::vm::BytecodeProgram> compileBytecode(std::string_view text, torture::Diagnostics& diagnostics) {
+    torture::SourceFile source{"<test>", std::string{text}};
+    if (!torture::compiler::checkIndentation(source, diagnostics)) {
+        return std::nullopt;
+    }
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    if (!parsed || diagnostics.hasErrors()) {
+        return std::nullopt;
+    }
+    if (!torture::compiler::checkProgramSemantics(*parsed, diagnostics)) {
+        return std::nullopt;
+    }
+    return torture::compiler::compileToBytecode(*parsed, diagnostics);
+}
+
+} // namespace
+
+TEST_CASE("compiler and VM run the first vertical smoke program", "[compiler][vm][smoke]") {
+    torture::SourceFile source{"<test>", programText};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "42\n");
+    CHECK_FALSE(diagnostics.hasErrors());
+}
+
+TEST_CASE("bytecode serialization emits a binary environment-bound opcode stream", "[vm][bytecode][smoke]") {
+    torture::Diagnostics diagnostics;
+    auto bytecode = compileBytecode(programText, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::ostringstream serialized(std::ios::out | std::ios::binary);
+    torture::vm::writeBytecode(serialized, *bytecode);
+    const auto blob = serialized.str();
+
+    REQUIRE(blob.size() > torture::vm::bytecode_format::kMagicBytes.size());
+    const std::string expectedMagic{
+        torture::vm::bytecode_format::kMagicBytes.begin(),
+        torture::vm::bytecode_format::kMagicBytes.end(),
+    };
+    CHECK(blob.substr(0, expectedMagic.size()) == expectedMagic);
+    CHECK(blob.find("TORTUREBC") == std::string::npos);
+    CHECK(blob.find("PUSHI") == std::string::npos);
+    CHECK(blob.find("HALT") == std::string::npos);
+
+    torture::Diagnostics readDiagnostics;
+    std::istringstream input(blob, std::ios::in | std::ios::binary);
+    auto roundTrip = torture::vm::readBytecode(input, "<memory>", readDiagnostics);
+    REQUIRE(roundTrip.has_value());
+    CHECK(roundTrip->functions.size() == bytecode->functions.size());
+
+    std::istringstream vmInput;
+    std::ostringstream vmOutput;
+    CHECK(torture::vm::runBytecode(*roundTrip, vmInput, vmOutput, readDiagnostics));
+    CHECK(vmOutput.str() == "42\n");
+    CHECK_FALSE(readDiagnostics.hasErrors());
+}
+
+TEST_CASE("bytecode refuses to run outside its compiler environment", "[vm][bytecode][environment]") {
+    torture::Diagnostics diagnostics;
+    auto bytecode = compileBytecode(programText, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    auto incompatible = *bytecode;
+    incompatible.environmentFingerprint = "not-current-compiler-environment";
+
+    std::ostringstream serialized(std::ios::out | std::ios::binary);
+    torture::vm::writeBytecode(serialized, incompatible);
+
+    torture::Diagnostics readDiagnostics;
+    std::istringstream input(serialized.str(), std::ios::in | std::ios::binary);
+    auto roundTrip = torture::vm::readBytecode(input, "<memory>", readDiagnostics);
+    CHECK_FALSE(roundTrip.has_value());
+    REQUIRE(readDiagnostics.hasErrors());
+    CHECK(readDiagnostics.all().back().code == torture::vm::bytecode_diagnostic::kEnvironmentMismatch);
+
+    torture::Diagnostics runDiagnostics;
+    std::istringstream vmInput;
+    std::ostringstream vmOutput;
+    CHECK_FALSE(torture::vm::runBytecode(incompatible, vmInput, vmOutput, runDiagnostics));
+    REQUIRE(runDiagnostics.hasErrors());
+    CHECK(runDiagnostics.all().back().code == torture::vm::bytecode_diagnostic::kEnvironmentMismatch);
+}
+
+TEST_CASE("VM prints declared string literals with println", "[compiler][vm][stdlib][literal][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = literal "HelloWorld" } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "HelloWorld\n");
+}
+
+TEST_CASE("VM prints through class factory strategy dependency injection ceremony", "[compiler][vm][class][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+class helloprinter fields 0 methods 3 authorized by root because literal "printing nine characters requires institutional ceremony" memory readable writable inherits object because literal "all printable things descend from the mandatory root object" patterns abstractfactory strategy dependencyinjection injects console {
+} implement {
+    method public callable returnable void init() code size 128 max stack size 64 locals 0 authorized by root requires security level 1 allowed roles admin {
+        proceed verifyfunctionidentity();
+    }
+    method public callable returnable void destroy() code size 128 max stack size 64 locals 0 authorized by root requires security level 1 allowed roles admin {
+        proceed verifyfunctionidentity();
+    }
+    method public callable returnable void print() code size 256 max stack size 128 locals 0 authorized by root requires security level 1 allowed roles admin {
+        proceed verifyfunctionidentity();
+        authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with justification "print through class strategy" with arguments { value by value = literal "HelloWorld" } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    }
+}
+function public callable returnable void main() code size 512 max stack size 128 locals 1 authorized by root requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    instantiate helloprinter printer authorized by root memory readable writable from printerfactory using strategy characterstrategy injecting console because literal "main is not trusted to print without a factory strategy and injected console";
+    authorize invocation of printer.print at security level 1 with memory limit 128 with timeout 1000 with justification "delegate printing to overdesigned object" with arguments { } discarding return predictstackdepth 8 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "HelloWorld\n");
+}
+
+TEST_CASE("VM rejects alwaysdeny approval", "[vm]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 x = 1;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain root with approval of alwaysdeny with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK_FALSE(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(diagnostics.all().back().message == "Approval denied");
+}
+
+TEST_CASE("VM executes authorized user function calls with role checks", "[vm][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable void printplus(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 y = compute (x + 1) with overflow trap;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    authorize invocation of printplus at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 41 } discarding return predictstackdepth 8 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "42\n");
+}
+
+TEST_CASE("VM executes approval functions with operator input", "[vm][approval][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public approval returnable readable bool:1 traderconfirm(readable char:8[] details) code size 128 max stack size 64 requires security level 1 allowed roles trader {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local bool:1 decision = false;
+    operatorinput prompt details timeout 1000 into decision;
+    return decision;
+}
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles trader {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 amount = 7;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = amount } discarding return predictstackdepth 4 with authority chain trader with approval of traderconfirm with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input{"yes\n"};
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "7\n");
+}
+
+TEST_CASE("VM assigns and invokes function pointers", "[vm][fptr][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable void printvalue(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose linkage scope local fptr<return:void, params:(int:32), security:1, maxstack:64, codesize:128> fp;
+    authorize fptr assignment of fp to printvalue with capture { } with attest "ok" with authority chain root;
+    authorize invocation via fp at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 9 } discarding return predictstackdepth 8 nullcheck true with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "9\n");
+}
+
+TEST_CASE("compiler lowers gate expressions to VM logic", "[compiler][vm][gate][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local bool:1 a = true;
+    declare mutable readable writable purpose computational scope local bool:1 b = false;
+    declare mutable readable writable purpose computational scope local bool:1 result = gate { wire a, b, out; xor(a, b, out); yield out; };
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = result } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "1\n");
+}
+
+TEST_CASE("VM handles while break and continue", "[vm][control][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 x = 0;
+    while (x < 5) {
+        proceed assign x = compute (x + 1) with overflow trap;
+        if (x == 3) {
+            proceed continue;
+        }
+        if (x == 4) {
+            proceed break;
+        }
+        authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    }
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "1\n2\n");
+}
+
+TEST_CASE("authorized return values can be assigned", "[compiler][vm][return][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 x = 0;
+    assign x = authorize invocation of inputint at security level 1 with memory limit 128 with timeout 1000 with justification "read" with arguments { } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input{"123\n"};
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "123\n");
+}
+
+TEST_CASE("VM supports flattened field assignment and access", "[compiler][vm][field][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose storage scope local int:32 tx;
+    assign tx.amount = 55;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = tx.amount } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "55\n");
+}
+
+TEST_CASE("VM handles for loops", "[vm][control][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 x = 0;
+    for (; x < 1; x) {
+        proceed assign x = 1;
+        authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    }
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "1\n");
+}
+
+TEST_CASE("VM grants roles through authority chains", "[vm][roles][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable void guarded(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles trader {
+    proceed verifyfunctionidentity();
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain trader with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    grant trader to desk via root;
+    authorize invocation of guarded at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 77 } discarding return predictstackdepth 4 with authority chain desk with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "77\n");
+}
+
+TEST_CASE("VM rejects calls after role revocation", "[vm][roles]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable void guarded(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles trader {
+    proceed verifyfunctionidentity();
+}
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    grant trader to desk via root;
+    revoke trader from desk;
+    authorize invocation of guarded at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 77 } discarding return predictstackdepth 4 with authority chain desk with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK_FALSE(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(diagnostics.all().back().message.find("lacks a role") != std::string::npos);
+}
+
+TEST_CASE("VM enforces grantor requirements", "[vm][roles][grantor]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable void guarded(readable int:32 x) code size 128 max stack size 64 requires security level 1 requires grantor root allowed roles trader {
+    proceed verifyfunctionidentity();
+}
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    grant trader to desk via root;
+    authorize invocation of guarded at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 77 } discarding return predictstackdepth 4 with authority chain desk with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK_FALSE(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(diagnostics.all().back().message.find("required grantor") != std::string::npos);
+}
+
+TEST_CASE("VM enforces callable-from requirements", "[vm][callablefrom]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable void guarded(readable int:32 x) where callable from broker code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+}
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    authorize invocation of guarded at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 77 } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK_FALSE(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(diagnostics.all().back().message.find("not callable from") != std::string::npos);
+}
+
+TEST_CASE("VM uses return values from user functions", "[vm][return][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable readable int:32 addone(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    return compute (x + 1) with overflow trap;
+}
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 y = 0;
+    assign y = authorize invocation of addone at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 9 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "10\n");
+}
+
+TEST_CASE("authorized function calls can be used as expressions", "[compiler][vm][return][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable readable int:32 addone(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    return compute (x + 1) with overflow trap;
+}
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 y = authorize invocation of addone at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 40 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "41\n");
+}
+
+TEST_CASE("authorized fptr calls can be used as expressions", "[compiler][vm][fptr][return][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable readable int:32 addone(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    return compute (x + 1) with overflow trap;
+}
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose linkage scope local fptr<return:int:32, params:(int:32), security:1, maxstack:64, codesize:128> fp;
+    authorize fptr assignment of fp to addone with capture { } with attest "ok" with authority chain root;
+    declare mutable readable writable purpose computational scope local int:32 y = authorize invocation via fp at security level 1 with memory limit 128 with timeout 1000 with justification "call" with arguments { x by value = 9 } predictstackdepth 4 nullcheck true with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "10\n");
+}
+
+TEST_CASE("VM passes writable references across function calls", "[vm][reference][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable void bump(readable writable ptr<readable writable, int:32> target) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    assign *target = compute ( *target + 1) with overflow trap;
+}
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 x = 4;
+    authorize invocation of bump at security level 1 with memory limit 128 with timeout 1000 with justification "bump" with arguments { target by reference = &x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "5\n");
+}
+
+TEST_CASE("VM supports copymemory and comparememory on references", "[vm][memory][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 512 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 src = 77;
+    declare mutable readable writable purpose computational scope local int:32 dst = 0;
+    declare mutable readable writable purpose computational scope local int:32 cmp = 99;
+    authorize invocation of copymemory at security level 1 with memory limit 128 with timeout 1000 with justification "copy" with arguments { dst by reference = &dst, src by reference = &src, length by value = 1 } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    assign cmp = authorize invocation of comparememory at security level 1 with memory limit 128 with timeout 1000 with justification "compare" with arguments { left by reference = &dst, right by reference = &src, length by value = 1 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = dst } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = cmp } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "77\n0\n");
+}
+
+TEST_CASE("VM supports inputchar outputchar and ECC verification", "[vm][stdlib][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose io scope local char:8 ch = 0;
+    assign ch = authorize invocation of inputchar at security level 1 with memory limit 128 with timeout 1000 with justification "read" with arguments { } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputchar at security level 1 with memory limit 128 with timeout 1000 with justification "write" with arguments { value by value = ch } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of verifymemoryintegrity at security level 1 with memory limit 128 with timeout 1000 with justification "ecc" with arguments { } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input{"Z"};
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "Z");
+}
+
+TEST_CASE("VM applies overflow policies", "[vm][overflow][smoke]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 512 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:64 wrapped = compute (9223372036854775807 + 1) with overflow wrap;
+    declare mutable readable writable purpose computational scope local int:64 saturated = compute (9223372036854775807 + 1) with overflow saturate;
+    declare mutable readable writable purpose computational scope local int:64 extended = compute (9223372036854775807 + 1) with overflow extend;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = wrapped } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = saturated } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = extended } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "-9223372036854775808\n9223372036854775807\n9223372036854775808\n");
+}
+
+TEST_CASE("VM traps overflow when requested", "[vm][overflow]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:64 x = compute (9223372036854775807 + 1) with overflow trap;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK_FALSE(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(diagnostics.all().back().message == "integer overflow");
+}
+
+TEST_CASE("VM invokes struct methods through typed values", "[vm][struct][smoke]") {
+    const char* names[] = {
+        "init", "destroy", "copy", "move", "serialize", "deserialize", "tostring", "fromstring", "hash", "compare",
+        "equals", "getproperty", "setproperty", "invoke", "getsize", "alignof", "defaultvalue", "validate", "mutate",
+        "clone",
+    };
+    std::string text = "require ecc;\nstruct thing = struct { } implement {\n";
+    for (const auto* name : names) {
+        text += "method public callable returnable void ";
+        text += name;
+        text += "() code size 128 max stack size 64 requires security level 1 allowed roles admin { proceed verifyfunctionidentity(); ";
+        if (std::string{name} == "init") {
+            text += "authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification \"print\" with arguments { value by value = 5 } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification \"ok\" with approval timeout 1000; ";
+        }
+        text += "}\n";
+    }
+    text += R"(}
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose storage scope local thing tx;
+    authorize invocation of tx.init at security level 1 with memory limit 128 with timeout 1000 with justification "init" with arguments { } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)";
+
+    torture::SourceFile source{"<test>", text};
+    torture::Diagnostics diagnostics;
+
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    REQUIRE_FALSE(diagnostics.hasErrors());
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "5\n");
+}
+
+TEST_CASE("VM lets struct methods mutate fields through self references", "[vm][struct][reference][smoke]") {
+    const char* names[] = {
+        "init", "destroy", "copy", "move", "serialize", "deserialize", "tostring", "fromstring", "hash", "compare",
+        "equals", "getproperty", "setproperty", "invoke", "getsize", "alignof", "defaultvalue", "validate", "mutate",
+        "clone",
+    };
+    std::string text = "require ecc;\nstruct record = struct {\n";
+    text += "    declare mutable readable writable purpose storage scope local int:32 amount;\n";
+    text += "} implement {\n";
+    for (const auto* name : names) {
+        text += "method public callable returnable void ";
+        text += name;
+        if (std::string{name} == "init") {
+            text += "(readable writable ptr<readable writable, record> self)";
+        } else {
+            text += "()";
+        }
+        text += " code size 128 max stack size 64 requires security level 1 allowed roles admin { proceed verifyfunctionidentity(); ";
+        if (std::string{name} == "init") {
+            text += "assign *self.amount = 12; ";
+        }
+        text += "}\n";
+    }
+    text += R"(}
+function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose storage scope local record tx;
+    authorize invocation of tx.init at security level 1 with memory limit 128 with timeout 1000 with justification "init" with arguments { self by reference = &tx } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = tx.amount } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)";
+
+    torture::SourceFile source{"<test>", text};
+    torture::Diagnostics diagnostics;
+
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    REQUIRE_FALSE(diagnostics.hasErrors());
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    CHECK(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    CHECK(output.str() == "12\n");
+}

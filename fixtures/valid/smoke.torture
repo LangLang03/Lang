@@ -1,0 +1,7 @@
+require ecc;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 x = 41;
+    assign x = compute (x + 1) with overflow trap;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain root with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
