@@ -339,12 +339,12 @@ TEST_CASE("VM handles while break and continue", "[vm][control][smoke]") {
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local int:32 x = 0;
-    while (x < 5) {
+    while (x authorize use operator < 5 because literal "loop guard authorizes less-than operator use") {
         proceed assign x = compute (x + 1) with overflow trap;
-        if (x == 3) judging authorized by root because literal "continue branch is approved by loop paperwork" expects elseifs 0 else 0 {
+        if (x authorize use operator == 3 because literal "continue branch authorizes equality operator use") judging authorized by root because literal "continue branch is approved by loop paperwork" expects elseifs 0 else 0 {
             proceed continue;
         }
-        if (x == 4) judging authorized by root because literal "break branch is approved by loop paperwork" expects elseifs 0 else 0 {
+        if (x authorize use operator == 4 because literal "break branch authorizes equality operator use") judging authorized by root because literal "break branch is approved by loop paperwork" expects elseifs 0 else 0 {
             proceed break;
         }
         authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
@@ -422,7 +422,7 @@ TEST_CASE("VM handles for loops", "[vm][control][smoke]") {
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local int:32 x = 0;
-    for (; x < 1; x) {
+    for (; x authorize use operator < 1 because literal "for loop authorizes less-than operator use"; x) {
         proceed assign x = 1;
         authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     }
@@ -451,14 +451,14 @@ function public callable returnable void main() code size 512 max stack size 128
     declare mutable readable writable purpose computational scope local int:32 x = 0;
     declare mutable readable writable purpose computational scope local bool:1 flag = false;
     assign x += flag ? 100 : 1;
-    if (x == 0) judging authorized by root because literal "primary arithmetic judgment has been requested" expects elseifs 1 else 1 {
+    if (x authorize use operator == 0 because literal "primary arithmetic judgment authorizes equality operator use") judging authorized by root because literal "primary arithmetic judgment has been requested" expects elseifs 1 else 1 {
         proceed assign x += 100;
-    } else if (x == 1) judging authorized by root because literal "secondary arithmetic judgment has been requested" expects elseifs 0 else 1 {
+    } else if (x authorize use operator == 1 because literal "secondary arithmetic judgment authorizes equality operator use") judging authorized by root because literal "secondary arithmetic judgment has been requested" expects elseifs 0 else 1 {
         proceed assign x *= 5;
     } else judging authorized by root because literal "fallback arithmetic judgment has been requested" {
         proceed assign x = 9;
     }
-    prove theorem arithmeticcommittee: require (x == 5) therefore (x >= 5) because literal "the arithmetic committee accepts five as at least five";
+    prove theorem arithmeticcommittee: require (x authorize use operator == 5 because literal "proof authorizes equality operator use") therefore (x authorize use operator >= 5 because literal "proof authorizes greater-equal operator use") because literal "the arithmetic committee accepts five as at least five";
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
@@ -483,14 +483,14 @@ TEST_CASE("VM enforces loop invariants and decreasing variants", "[vm][syntax][p
 function public callable returnable void main() code size 1024 max stack size 256 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local int:32 x = 0;
-    do invariant (x >= 0) because literal "x is administratively classified as nonnegative" decreases (4 - x) because literal "the remaining iteration budget must strictly descend" {
+    do invariant (x authorize use operator >= 0 because literal "loop invariant authorizes greater-equal operator use") because literal "x is administratively classified as nonnegative" decreases (4 - x) because literal "the remaining iteration budget must strictly descend" {
         proceed assign x += 1;
-        if (x == 2) judging authorized by root because literal "continue judgment is part of the decreasing variant ceremony" expects elseifs 0 else 0 {
+        if (x authorize use operator == 2 because literal "continue judgment authorizes equality operator use") judging authorized by root because literal "continue judgment is part of the decreasing variant ceremony" expects elseifs 0 else 0 {
             proceed continue;
         }
         authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
-    } until (x >= 4);
-    prove theorem finalbudget: require (x == 4) therefore (x >= 0) because literal "formal loop paperwork has reached the archive";
+    } until (x authorize use operator >= 4 because literal "until clause authorizes greater-equal operator use");
+    prove theorem finalbudget: require (x authorize use operator == 4 because literal "final proof authorizes equality operator use") therefore (x authorize use operator >= 0 because literal "final proof authorizes greater-equal operator use") because literal "formal loop paperwork has reached the archive";
 }
 )"};
     torture::Diagnostics diagnostics;

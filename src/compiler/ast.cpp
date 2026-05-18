@@ -52,6 +52,7 @@ ExprPtr makeExpr(ExprKind kind, SourceLocation location, std::string text) {
 ExprPtr cloneExpr(const Expr& expr) {
     auto copy = makeExpr(expr.kind, expr.location, expr.text);
     copy->declaredLiteral = expr.declaredLiteral;
+    copy->operatorAuthorized = expr.operatorAuthorized;
     copy->gateOps = expr.gateOps;
     copy->authorizeCall = cloneCall(expr.authorizeCall);
     if (expr.left) {
@@ -62,6 +63,9 @@ ExprPtr cloneExpr(const Expr& expr) {
     }
     if (expr.third) {
         copy->third = cloneExpr(*expr.third);
+    }
+    if (expr.operatorReason) {
+        copy->operatorReason = cloneExpr(*expr.operatorReason);
     }
     return copy;
 }

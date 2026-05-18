@@ -76,9 +76,11 @@ struct Expr {
     SourceLocation location;
     std::string text;
     bool declaredLiteral = false;
+    bool operatorAuthorized = false;
     ExprPtr left;
     ExprPtr right;
     ExprPtr third;
+    ExprPtr operatorReason;
     std::vector<GateOp> gateOps;
     AuthorizeCall authorizeCall;
 };

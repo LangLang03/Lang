@@ -19,13 +19,13 @@ const std::unordered_set<std::string>& keywords() {
         "global", "grant", "grantor", "hash", "if", "ignore", "immutable", "implement", "inherits", "injecting", "injects", "in", "inputchar", "into", "instantiate", "invocation",
         "inputint", "int", "integrity", "invariant", "invoke", "io", "isolation", "judge", "judging", "justify", "justification", "ledgerdivergence", "ledgeridentity", "level",
         "limit", "linkage", "literal", "local", "locals", "max", "memory", "method", "methods", "move", "mutable", "nand", "nominate",
-        "nor", "not", "null", "nullcheck", "of", "onchange", "onread", "onwrite", "operation", "operatorinput", "over",
+        "nor", "not", "null", "nullcheck", "of", "onchange", "onread", "onwrite", "operation", "operator", "operatorinput", "over",
         "or", "outputchar", "outputint", "overflow", "patterns", "predictstackdepth", "println", "private", "proceed", "proof", "prompt", "protected",
         "prove", "ptr", "public", "purpose", "readable", "ref", "reference", "register", "require", "requires", "response", "return",
         "returnable", "revoke", "role", "roles", "saturate", "scope", "seal", "security", "serialize",
         "setproperty", "signature", "size", "stack", "storage", "struct", "synchronized", "than", "theorem", "therefore", "thread",
         "strategy", "timeout", "to", "trace", "trap", "tribunal", "true", "trustee", "type", "uint", "uncallable", "unseal",
-        "until", "value", "verifyfunctionidentity", "verifymemoryintegrity", "via", "void", "volatile",
+        "until", "use", "value", "verifyfunctionidentity", "verifymemoryintegrity", "via", "void", "volatile",
         "where", "while", "wire", "with", "wrap", "writable", "xor", "yield", "yieldgate",
     };
     return value;

@@ -279,6 +279,8 @@ std::optional<std::string> inferExprType(
 
 std::string resolveCallTarget(const std::string& target, const std::unordered_map<std::string, LocalInfo>& locals);
 
+bool isDeclaredLiteralExpr(const Expr* expr);
+
 std::optional<std::string> inferCallReturnType(
     const AuthorizeCall& call,
     const std::unordered_map<std::string, LocalInfo>& locals,
@@ -473,10 +475,27 @@ bool checkComparisonRule(
         return true;
     }
 
+    bool ok = true;
+    if (!expr.operatorAuthorized) {
+        diagnostics.error(
+            "sema",
+            "missing-operator-authorization",
+            expr.location,
+            "comparison operators must be written as authorize use operator <op> ... because literal \"...\"");
+        ok = false;
+    } else if (!isDeclaredLiteralExpr(expr.operatorReason.get())) {
+        diagnostics.error(
+            "sema",
+            "missing-operator-authorization-reason",
+            expr.location,
+            "operator authorization must explain why using because literal \"...\"");
+        ok = false;
+    }
+
     const auto leftType = inferExprType(expr.left.get(), locals, &functions, &structFields);
     const auto rightType = inferExprType(expr.right.get(), locals, &functions, &structFields);
     if (!leftType || !rightType) {
-        return true;
+        return ok;
     }
 
     const auto left = normalized(*leftType);
@@ -504,7 +523,7 @@ bool checkComparisonRule(
                 "pointer/reference comparisons require identical pointer kind, access permissions, and target type");
             return false;
         }
-        return true;
+        return ok;
     }
 
     const auto leftScalar = scalarInfo(left);
@@ -521,13 +540,13 @@ bool checkComparisonRule(
     const bool leftLiteral = expr.left && expr.left->kind == ExprKind::Integer;
     const bool rightLiteral = expr.right && expr.right->kind == ExprKind::Integer;
     if ((leftLiteral && isArithmeticScalar(*rightScalar)) || (rightLiteral && isArithmeticScalar(*leftScalar))) {
-        return true;
+        return ok;
     }
 
     if (leftScalar->kind == ScalarKind::Boolean || rightScalar->kind == ScalarKind::Boolean) {
         if (leftScalar->kind == ScalarKind::Boolean && rightScalar->kind == ScalarKind::Boolean) {
             if (equality) {
-                return true;
+                return ok;
             }
             diagnostics.error("sema", "bool-order-comparison", expr.location, "bool:1 only supports == and !=");
             return false;
@@ -545,7 +564,7 @@ bool checkComparisonRule(
                 "numeric comparisons require identical bit widths");
             return false;
         }
-        return true;
+        return ok;
     }
 
     if (leftScalar->kind == ScalarKind::Character && rightScalar->kind == ScalarKind::Character) {
@@ -557,7 +576,7 @@ bool checkComparisonRule(
                 "character comparisons require identical bit widths");
             return false;
         }
-        return true;
+        return ok;
     }
 
     diagnostics.error(
@@ -582,6 +601,7 @@ bool checkComparisonTypes(
     ok = checkComparisonTypes(expr->left.get(), locals, functions, structFields, structNames, diagnostics) && ok;
     ok = checkComparisonTypes(expr->right.get(), locals, functions, structFields, structNames, diagnostics) && ok;
     ok = checkComparisonTypes(expr->third.get(), locals, functions, structFields, structNames, diagnostics) && ok;
+    ok = checkComparisonTypes(expr->operatorReason.get(), locals, functions, structFields, structNames, diagnostics) && ok;
     ok = checkComparisonRule(*expr, locals, functions, structFields, structNames, diagnostics) && ok;
     for (const auto& arg : expr->authorizeCall.arguments) {
         ok = checkComparisonTypes(arg.value.get(), locals, functions, structFields, structNames, diagnostics) && ok;
@@ -600,7 +620,8 @@ bool exprContainsCall(const Expr* expr) {
     if (expr->kind == ExprKind::AuthorizeCall) {
         return true;
     }
-    if (exprContainsCall(expr->left.get()) || exprContainsCall(expr->right.get()) || exprContainsCall(expr->third.get())) {
+    if (exprContainsCall(expr->left.get()) || exprContainsCall(expr->right.get()) || exprContainsCall(expr->third.get()) ||
+        exprContainsCall(expr->operatorReason.get())) {
         return true;
     }
     for (const auto& arg : expr->authorizeCall.arguments) {
@@ -1287,6 +1308,7 @@ bool checkExpressionCalls(
     ok = checkExpressionCalls(function, expr->left.get(), diagnostics, functions, locals, structFields) && ok;
     ok = checkExpressionCalls(function, expr->right.get(), diagnostics, functions, locals, structFields) && ok;
     ok = checkExpressionCalls(function, expr->third.get(), diagnostics, functions, locals, structFields) && ok;
+    ok = checkExpressionCalls(function, expr->operatorReason.get(), diagnostics, functions, locals, structFields) && ok;
     return ok;
 }
 

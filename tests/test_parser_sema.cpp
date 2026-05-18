@@ -362,10 +362,10 @@ function public callable returnable void main() code size 256 max stack size 128
     declare mutable readable writable purpose computational scope local bool:1 disabled = false;
     declare mutable readable writable purpose computational scope local ptr<readable, int:32> left;
     declare mutable readable writable purpose computational scope local ptr<readable, int:32> right;
-    declare mutable readable writable purpose computational scope local bool:1 numericok = signedvalue < unsignedvalue;
-    declare mutable readable writable purpose computational scope local bool:1 charok = letter != other;
-    declare mutable readable writable purpose computational scope local bool:1 boolok = enabled == disabled;
-    declare mutable readable writable purpose computational scope local bool:1 ptrok = left == right;
+    declare mutable readable writable purpose computational scope local bool:1 numericok = signedvalue authorize use operator < unsignedvalue because literal "numeric comparison authorizes less-than operator use";
+    declare mutable readable writable purpose computational scope local bool:1 charok = letter authorize use operator != other because literal "character comparison authorizes inequality operator use";
+    declare mutable readable writable purpose computational scope local bool:1 boolok = enabled authorize use operator == disabled because literal "boolean comparison authorizes equality operator use";
+    declare mutable readable writable purpose computational scope local bool:1 ptrok = left authorize use operator == right because literal "pointer comparison authorizes equality operator use";
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -403,7 +403,7 @@ function public callable returnable void main() code size 128 max stack size 64 
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local int:32 narrow = 1;
     declare mutable readable writable purpose computational scope local int:64 wide = 1;
-    declare mutable readable writable purpose computational scope local bool:1 same = narrow == wide;
+    declare mutable readable writable purpose computational scope local bool:1 same = narrow authorize use operator == wide because literal "mismatched-width test authorizes equality operator use";
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -417,13 +417,33 @@ function public callable returnable void main() code size 128 max stack size 64 
     CHECK(hasDiagnosticCode(diagnostics, "comparison-width-mismatch"));
 }
 
+TEST_CASE("sema requires explicit operator authorization for comparisons", "[sema][types][compare][operator]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 left = 1;
+    declare mutable readable writable purpose computational scope local int:32 right = 1;
+    declare mutable readable writable purpose computational scope local bool:1 same = left == right;
+}
+)"};
+    torture::Diagnostics diagnostics;
+
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    CHECK_FALSE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(hasDiagnosticCode(diagnostics, "missing-operator-authorization"));
+}
+
 TEST_CASE("sema rejects boolean order comparisons", "[sema][types][compare]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local bool:1 left = true;
     declare mutable readable writable purpose computational scope local bool:1 right = false;
-    declare mutable readable writable purpose computational scope local bool:1 ordered = left < right;
+    declare mutable readable writable purpose computational scope local bool:1 ordered = left authorize use operator < right because literal "boolean order test authorizes less-than operator use";
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -443,7 +463,7 @@ function public callable returnable void main() code size 128 max stack size 64 
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose computational scope local ptr<readable, int:32> readableptr;
     declare mutable readable writable purpose computational scope local ptr<writable, int:32> writableptr;
-    declare mutable readable writable purpose computational scope local bool:1 same = readableptr == writableptr;
+    declare mutable readable writable purpose computational scope local bool:1 same = readableptr authorize use operator == writableptr because literal "pointer mismatch test authorizes equality operator use";
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -475,7 +495,7 @@ function public callable returnable void main() code size 256 max stack size 128
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose storage scope local gradebook left;
     declare mutable readable writable purpose storage scope local gradebook right;
-    declare mutable readable writable purpose computational scope local bool:1 same = left == right;
+    declare mutable readable writable purpose computational scope local bool:1 same = left authorize use operator == right because literal "struct comparison test authorizes equality operator use";
 }
 )"};
     torture::Diagnostics diagnostics;

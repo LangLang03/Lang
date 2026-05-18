@@ -1,6 +1,7 @@
 #include "compiler/parser.h"
 
 #include <charconv>
+#include <initializer_list>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -141,6 +142,16 @@ private:
             return "/";
         }
         return std::nullopt;
+    }
+
+    struct OperatorUse {
+        Token op;
+        bool authorized = false;
+        ExprPtr reason;
+    };
+
+    static bool isAllowedOperator(std::string_view text, std::initializer_list<std::string_view> allowed) {
+        return std::find(allowed.begin(), allowed.end(), text) != allowed.end();
     }
 
     std::string parseAccessFlags() {
@@ -1404,22 +1415,78 @@ private:
         return expr;
     }
 
+    std::optional<OperatorUse> parseOperatorUse(std::initializer_list<std::string_view> allowed) {
+        if (check("authorize")) {
+            if (position_ + 3 >= tokens_.size() || tokens_[position_ + 1].text != "use" ||
+                tokens_[position_ + 2].text != "operator" ||
+                !isAllowedOperator(tokens_[position_ + 3].text, allowed)) {
+                return std::nullopt;
+            }
+            position_ += 3;
+            if (!isAllowedOperator(current().text, allowed)) {
+                error(current(), "expected-authorized-operator", "expected authorized comparison operator");
+                return std::nullopt;
+            }
+            OperatorUse use;
+            use.op = current();
+            use.authorized = true;
+            ++position_;
+            return use;
+        }
+        for (const auto op : allowed) {
+            if (match(op)) {
+                return OperatorUse{previous(), false, nullptr};
+            }
+        }
+        return std::nullopt;
+    }
+
     ExprPtr parseEquality() {
         auto expr = parseRelational();
-        while (match("==") || match("!=")) {
-            const auto op = previous();
+        while (true) {
+            auto op = parseOperatorUse({"==", "!="});
+            if (!op) {
+                break;
+            }
             auto right = parseRelational();
-            expr = makeBinary(std::move(expr), op, std::move(right));
+            if (!right) {
+                return nullptr;
+            }
+            if (op->authorized) {
+                op->reason = parseBecauseLiteral("operator authorization");
+                if (!op->reason) {
+                    return nullptr;
+                }
+            }
+            auto binary = makeBinary(std::move(expr), op->op, std::move(right));
+            binary->operatorAuthorized = op->authorized;
+            binary->operatorReason = std::move(op->reason);
+            expr = std::move(binary);
         }
         return expr;
     }
 
     ExprPtr parseRelational() {
         auto expr = parseAdditive();
-        while (match("<") || match(">") || match("<=") || match(">=")) {
-            const auto op = previous();
+        while (true) {
+            auto op = parseOperatorUse({"<", ">", "<=", ">="});
+            if (!op) {
+                break;
+            }
             auto right = parseAdditive();
-            expr = makeBinary(std::move(expr), op, std::move(right));
+            if (!right) {
+                return nullptr;
+            }
+            if (op->authorized) {
+                op->reason = parseBecauseLiteral("operator authorization");
+                if (!op->reason) {
+                    return nullptr;
+                }
+            }
+            auto binary = makeBinary(std::move(expr), op->op, std::move(right));
+            binary->operatorAuthorized = op->authorized;
+            binary->operatorReason = std::move(op->reason);
+            expr = std::move(binary);
         }
         return expr;
     }
