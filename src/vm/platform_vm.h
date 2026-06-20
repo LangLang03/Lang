@@ -13,7 +13,7 @@ namespace torture::vm::platform_vm {
 const std::unordered_map<std::uint16_t, const char*>& dispatchTable();
 
 // 检查 id 是否属于本平台合法 opcode 范围（高字节 == TORTURE_PLATFORM_ID，
-// 低字节落在 [0x01, 0x42] 区间）。
+// 低字节落在当前平台特化的本地 opcode 范围内，见 platform_bytecode_<plat>.h）。
 bool isOwnPlatformOpcode(std::uint16_t id);
 
 }  // namespace torture::vm::platform_vm

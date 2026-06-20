@@ -1,10 +1,12 @@
 #include "vm/vm.h"
+#include "vm/instruction_handler.h"
+#include "vm/memory.h"
+#include "vm/value.h"
 
 #include <algorithm>
-#include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <istream>
-#include <limits>
 #include <ostream>
 #include <stdexcept>
 #include <string>
@@ -18,229 +20,7 @@ namespace {
 
 using Int = __int128_t;
 
-constexpr char kDigitZero = '0';
-constexpr int kDecimalBase = 10;
-constexpr int kHexAlphaOffset = 10;
-constexpr int kHexHighNibbleShift = 4;
-constexpr std::size_t kHexEncodedByteWidth = 2;
-constexpr std::string_view kIntegerZeroText = "0";
 constexpr std::string_view kInstructionTrue = "1";
-
-enum class ValueKind {
-    Null,
-    Integer,
-    String,
-    Ref,
-};
-
-struct Value {
-    ValueKind kind = ValueKind::Integer;
-    Int integer = 0;
-    std::string string;
-};
-
-Int parseInteger(const std::string& text);
-
-Value integerValue(Int value) {
-    return Value{ValueKind::Integer, value, {}};
-}
-
-Value stringValue(std::string value) {
-    return Value{ValueKind::String, 0, std::move(value)};
-}
-
-Value nullValue() {
-    return Value{ValueKind::Null, 0, {}};
-}
-
-Value refValue(std::string name) {
-    return Value{ValueKind::Ref, 0, std::move(name)};
-}
-
-bool equalsSymbol(const std::string& value, std::string_view symbol) {
-    return std::string_view{value} == symbol;
-}
-
-Int asInteger(const Value& value) {
-    if (value.kind == ValueKind::Integer) {
-        return value.integer;
-    }
-    if (value.kind == ValueKind::Null) {
-        return 0;
-    }
-    if (value.kind == ValueKind::Ref) {
-        throw std::runtime_error("cannot use reference as integer without dereference");
-    }
-    return parseInteger(value.string);
-}
-
-bool asBool(const Value& value) {
-    if (value.kind == ValueKind::String) {
-        return !value.string.empty();
-    }
-    return asInteger(value) != 0;
-}
-
-bool equalsValue(const Value& left, const Value& right) {
-    if (left.kind == ValueKind::String || right.kind == ValueKind::String || left.kind == ValueKind::Ref || right.kind == ValueKind::Ref) {
-        return left.string == right.string;
-    }
-    return asInteger(left) == asInteger(right);
-}
-
-Int parseInteger(const std::string& text) {
-    Int value = 0;
-    bool negative = false;
-    std::size_t index = 0;
-    if (!text.empty() && text.front() == '-') {
-        negative = true;
-        index = 1;
-    }
-    for (; index < text.size(); ++index) {
-        value = value * kDecimalBase + static_cast<Int>(text[index] - kDigitZero);
-    }
-    if (negative) {
-        value = -value;
-    }
-    return value;
-}
-
-std::string intToString(Int value) {
-    if (value == 0) {
-        return std::string{kIntegerZeroText};
-    }
-    bool negative = value < 0;
-    if (negative) {
-        value = -value;
-    }
-    std::string out;
-    while (value > 0) {
-        out.push_back(static_cast<char>(kDigitZero + value % kDecimalBase));
-        value /= kDecimalBase;
-    }
-    if (negative) {
-        out.push_back('-');
-    }
-    std::reverse(out.begin(), out.end());
-    return out;
-}
-
-std::string valueToString(const Value& value) {
-    if (value.kind == ValueKind::String) {
-        return value.string;
-    }
-    if (value.kind == ValueKind::Null) {
-        return std::string{source_literal::kNull};
-    }
-    if (value.kind == ValueKind::Ref) {
-        return value.string;
-    }
-    return intToString(value.integer);
-}
-
-std::size_t toSize(Int value) {
-    if (value < 0) {
-        throw std::runtime_error("negative bytecode jump target");
-    }
-    return static_cast<std::size_t>(value);
-}
-
-Int int64Min() {
-    return static_cast<Int>(std::numeric_limits<std::int64_t>::min());
-}
-
-Int int64Max() {
-    return static_cast<Int>(std::numeric_limits<std::int64_t>::max());
-}
-
-Int clamp64(Int value) {
-    if (value < int64Min()) {
-        return int64Min();
-    }
-    if (value > int64Max()) {
-        return int64Max();
-    }
-    return value;
-}
-
-Int wrap64(Int value) {
-    const auto signed_bits = std::numeric_limits<std::int64_t>::digits;
-    const auto unsigned_bits = std::numeric_limits<std::uint64_t>::digits;
-    const Int unsigned_range = static_cast<Int>(1) << unsigned_bits;
-    const Int sign_bit = static_cast<Int>(1) << signed_bits;
-    Int wrapped = value % unsigned_range;
-    if (wrapped < 0) {
-        wrapped += unsigned_range;
-    }
-    if (wrapped >= sign_bit) {
-        wrapped -= unsigned_range;
-    }
-    return wrapped;
-}
-
-Int applyOverflowPolicy(Int value, const std::string& policy) {
-    if (equalsSymbol(policy, overflow_policy::kWrap)) {
-        return wrap64(value);
-    }
-    if (equalsSymbol(policy, overflow_policy::kSaturate)) {
-        return clamp64(value);
-    }
-    if (equalsSymbol(policy, overflow_policy::kTrap) && (value < int64Min() || value > int64Max())) {
-        throw std::runtime_error("integer overflow");
-    }
-    return value;
-}
-
-std::pair<std::string, std::string> splitOpPolicy(const std::string& op) {
-    // 输入示例："ADD_LX64"、"ADD_trap_LX64"、"ADD_wrap_LX64"。
-    // 目标：baseOp = "ADD_LX64"（保留平台后缀），policy = "" 或 "trap"/"wrap"/...
-    // 做法：剥掉末尾平台后缀（"_LX64"），按 '_' 拆分；再把平台后缀拼回 base。
-    constexpr std::string_view kPlatformSuffix = torture::vm::platform_bytecode::kPlatformSuffix;
-    std::string suffix{std::string{kPlatformSuffix.size(), '_'}.append(std::string{kPlatformSuffix})};
-    std::string stripped = op;
-    std::string platformTail;
-    if (stripped.size() > suffix.size() &&
-        stripped.compare(stripped.size() - kPlatformSuffix.size(), kPlatformSuffix.size(), kPlatformSuffix) == 0 &&
-        stripped[stripped.size() - kPlatformSuffix.size() - 1] == '_') {
-        platformTail.assign(kPlatformSuffix);
-        stripped.erase(stripped.size() - kPlatformSuffix.size() - 1);
-    }
-    const auto pos = stripped.find('_');
-    if (pos == std::string::npos) {
-        if (platformTail.empty()) {
-            return {stripped, ""};
-        }
-        return {stripped + "_" + platformTail, ""};
-    }
-    std::string base = stripped.substr(0, pos) + (platformTail.empty() ? "" : "_" + platformTail);
-    std::string policy = stripped.substr(pos + 1);
-    return {base, policy};
-}
-
-int hexDigit(char ch) {
-    if (ch >= '0' && ch <= '9') {
-        return ch - '0';
-    }
-    if (ch >= 'a' && ch <= 'f') {
-        return kHexAlphaOffset + ch - 'a';
-    }
-    if (ch >= 'A' && ch <= 'F') {
-        return kHexAlphaOffset + ch - 'A';
-    }
-    throw std::runtime_error("bad hex string in bytecode");
-}
-
-std::string hexDecode(const std::string& text) {
-    if (text.size() % kHexEncodedByteWidth != 0) {
-        throw std::runtime_error("bad hex string length in bytecode");
-    }
-    std::string out;
-    out.reserve(text.size() / kHexEncodedByteWidth);
-    for (std::size_t i = 0; i < text.size(); i += kHexEncodedByteWidth) {
-        out.push_back(static_cast<char>((hexDigit(text[i]) << kHexHighNibbleShift) | hexDigit(text[i + 1])));
-    }
-    return out;
-}
 
 const FunctionBytecode* findFunction(const BytecodeProgram& program, const std::string& name) {
     for (const auto& function : program.functions) {
@@ -251,19 +31,16 @@ const FunctionBytecode* findFunction(const BytecodeProgram& program, const std::
     return nullptr;
 }
 
-Value pop(std::vector<Value>& stack) {
-    if (stack.empty()) {
-        throw std::runtime_error("stack underflow");
-    }
-    auto value = stack.back();
-    stack.pop_back();
-    return value;
-}
+} // namespace
 
-void pushBool(std::vector<Value>& stack, bool value) {
-    stack.push_back(integerValue(value ? 1 : 0));
-}
+// 前向声明处理器类，用于友元声明
+class StackHandler;
+class ArithmeticHandler;
+class ControlFlowHandler;
+class IoHandler;
+class SecurityHandler;
 
+// VM 解释器类，负责执行字节码程序
 class Interpreter {
 public:
     Interpreter(const BytecodeProgram& program, std::istream& input, std::ostream& output, Diagnostics& diagnostics, VmOptions options)
@@ -305,7 +82,16 @@ public:
         return !diagnostics_.hasErrors();
     }
 
+    Value execute(const FunctionBytecode& function, const std::vector<Value>& args, const std::string& caller);
+
 private:
+    // 声明处理器类为友元，允许访问私有成员
+    friend class StackHandler;
+    friend class ArithmeticHandler;
+    friend class ControlFlowHandler;
+    friend class IoHandler;
+    friend class SecurityHandler;
+
     bool chainHasRole(const std::string& chain, const std::string& role) const {
         if (equalsSymbol(chain, builtin::kRootAuthority) || chain == role) {
             return true;
@@ -358,331 +144,6 @@ private:
         }
     }
 
-    Value execute(const FunctionBytecode& function, const std::vector<Value>& args, const std::string& caller) {
-        if (args.size() != function.params.size()) {
-            throw std::runtime_error("function '" + function.name + "' expected " + std::to_string(function.params.size()) +
-                " arguments but got " + std::to_string(args.size()));
-        }
-        if (!function.callableFrom.empty() && !caller.empty() &&
-            std::find(function.callableFrom.begin(), function.callableFrom.end(), caller) == function.callableFrom.end()) {
-            throw std::runtime_error("function '" + function.name + "' is not callable from '" + caller + "'");
-        }
-        std::vector<Value> stack;
-        std::unordered_map<std::string, std::string> localAddresses;
-        const auto framePrefix = function.name + "#" + std::to_string(nextFrameId_++) + ":";
-        auto ensureAddress = [&](const std::string& name) -> const std::string& {
-            const auto [it, inserted] = localAddresses.emplace(name, framePrefix + name);
-            if (inserted) {
-                memory_.emplace(it->second, integerValue(0));
-            }
-            return it->second;
-        };
-        auto loadLocal = [&](const std::string& name) {
-            return memory_[ensureAddress(name)];
-        };
-        auto storeLocal = [&](const std::string& name, Value value) {
-            memory_[ensureAddress(name)] = std::move(value);
-        };
-        auto refLocal = [&](const std::string& name) {
-            return refValue(ensureAddress(name));
-        };
-        auto loadRef = [&](const Value& ref) {
-            if (ref.kind != ValueKind::Ref) {
-                throw std::runtime_error("cannot dereference non-reference value");
-            }
-            return memory_[ref.string];
-        };
-        auto storeRef = [&](const Value& ref, Value value) {
-            if (ref.kind != ValueKind::Ref) {
-                throw std::runtime_error("cannot assign through non-reference value");
-            }
-            memory_[ref.string] = std::move(value);
-        };
-        for (const auto& local : function.locals) {
-            ensureAddress(local);
-        }
-        for (std::size_t i = 0; i < function.params.size(); ++i) {
-            storeLocal(function.params[i], args[i]);
-        }
-
-        std::size_t pc = 0;
-        while (pc < function.code.size()) {
-            if (++steps_ > options_.maxSteps) {
-                throw std::runtime_error("VM step limit exceeded");
-            }
-            if (stack.size() > static_cast<std::size_t>(function.maxStackSize)) {
-                throw std::runtime_error("max stack size exceeded in function " + function.name);
-            }
-            const auto& instruction = function.code[pc];
-            const auto& op = instruction.op;
-            const auto [baseOp, policy] = splitOpPolicy(op);
-
-            if (op == opcodeName(Opcode::kVerify)) {
-                const auto actual = functionFingerprint(function);
-                if (actual != function.hash) {
-                    throw std::runtime_error("Function identity verification failed for " + function.name);
-                }
-                ++pc;
-            } else if (op == opcodeName(Opcode::kPushInteger)) {
-                stack.push_back(integerValue(parseInteger(instruction.args.at(0))));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kPushString)) {
-                stack.push_back(stringValue(hexDecode(instruction.args.at(0))));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kPushNull)) {
-                stack.push_back(nullValue());
-                ++pc;
-            } else if (op == opcodeName(Opcode::kPushReference)) {
-                stack.push_back(refLocal(instruction.args.at(0)));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kDereference)) {
-                const auto ref = pop(stack);
-                stack.push_back(loadRef(ref));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kFieldReference)) {
-                auto ref = pop(stack);
-                if (ref.kind != ValueKind::Ref) {
-                    throw std::runtime_error("cannot access field through non-reference value");
-                }
-                ref.string += ".";
-                ref.string += instruction.args.at(0);
-                stack.push_back(std::move(ref));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kLoad)) {
-                stack.push_back(loadLocal(instruction.args.at(0)));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kStore)) {
-                storeLocal(instruction.args.at(0), pop(stack));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kStoreDereference)) {
-                const auto value = pop(stack);
-                const auto ref = pop(stack);
-                storeRef(ref, value);
-                ++pc;
-            } else if (op == opcodeName(Opcode::kStorePointer)) {
-                storeLocal(instruction.args.at(0), stringValue(instruction.args.at(1)));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kPop)) {
-                pop(stack);
-                ++pc;
-            } else if (baseOp == opcodeName(Opcode::kAdd) || baseOp == opcodeName(Opcode::kSub) ||
-                       baseOp == opcodeName(Opcode::kMul) || baseOp == opcodeName(Opcode::kDiv) ||
-                       op == opcodeName(Opcode::kEqual) || op == opcodeName(Opcode::kNotEqual) ||
-                       op == opcodeName(Opcode::kLess) || op == opcodeName(Opcode::kLessEqual) ||
-                       op == opcodeName(Opcode::kGreater) || op == opcodeName(Opcode::kGreaterEqual) ||
-                       op == opcodeName(Opcode::kAnd) || op == opcodeName(Opcode::kOr) ||
-                       op == opcodeName(Opcode::kXor) || op == opcodeName(Opcode::kNand) ||
-                       op == opcodeName(Opcode::kNor)) {
-                const auto rightValue = pop(stack);
-                const auto leftValue = pop(stack);
-                const auto right = asInteger(rightValue);
-                const auto left = asInteger(leftValue);
-                if (baseOp == opcodeName(Opcode::kAdd)) {
-                    if (leftValue.kind == ValueKind::String || rightValue.kind == ValueKind::String) {
-                        stack.push_back(stringValue(leftValue.string + rightValue.string));
-                    } else {
-                        stack.push_back(integerValue(applyOverflowPolicy(left + right, policy)));
-                    }
-                } else if (baseOp == opcodeName(Opcode::kSub)) {
-                    stack.push_back(integerValue(applyOverflowPolicy(left - right, policy)));
-                } else if (baseOp == opcodeName(Opcode::kMul)) {
-                    stack.push_back(integerValue(applyOverflowPolicy(left * right, policy)));
-                } else if (baseOp == opcodeName(Opcode::kDiv)) {
-                    if (right == 0) {
-                        throw std::runtime_error("division by zero");
-                    }
-                    stack.push_back(integerValue(applyOverflowPolicy(left / right, policy)));
-                } else if (op == opcodeName(Opcode::kEqual)) {
-                    pushBool(stack, equalsValue(leftValue, rightValue));
-                } else if (op == opcodeName(Opcode::kNotEqual)) {
-                    pushBool(stack, !equalsValue(leftValue, rightValue));
-                } else if (op == opcodeName(Opcode::kLess)) {
-                    pushBool(stack, left < right);
-                } else if (op == opcodeName(Opcode::kLessEqual)) {
-                    pushBool(stack, left <= right);
-                } else if (op == opcodeName(Opcode::kGreater)) {
-                    pushBool(stack, left > right);
-                } else if (op == opcodeName(Opcode::kGreaterEqual)) {
-                    pushBool(stack, left >= right);
-                } else if (op == opcodeName(Opcode::kAnd)) {
-                    pushBool(stack, left != 0 && right != 0);
-                } else if (op == opcodeName(Opcode::kOr)) {
-                    pushBool(stack, left != 0 || right != 0);
-                } else if (op == opcodeName(Opcode::kXor)) {
-                    pushBool(stack, (left != 0) != (right != 0));
-                } else if (op == opcodeName(Opcode::kNand)) {
-                    pushBool(stack, !(left != 0 && right != 0));
-                } else if (op == opcodeName(Opcode::kNor)) {
-                    pushBool(stack, !(left != 0 || right != 0));
-                }
-                ++pc;
-            } else if (op == opcodeName(Opcode::kNot)) {
-                pushBool(stack, !asBool(pop(stack)));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kJump)) {
-                pc = toSize(parseInteger(instruction.args.at(0)));
-            } else if (op == opcodeName(Opcode::kJumpIfZero)) {
-                const auto target = toSize(parseInteger(instruction.args.at(0)));
-                pc = !asBool(pop(stack)) ? target : pc + 1;
-            } else if (op == opcodeName(Opcode::kCheckApproval)) {
-                const auto& approval = instruction.args.at(0);
-                if (equalsSymbol(approval, builtin::kAlwaysDeny)) {
-                    throw std::runtime_error("Approval denied");
-                }
-                if (!equalsSymbol(approval, builtin::kAlwaysApprove)) {
-                    const auto* approvalFunction = findFunction(program_, approval);
-                    if (approvalFunction == nullptr || !equalsSymbol(approvalFunction->category, function_category::kApproval)) {
-                        throw std::runtime_error("Unknown approval function '" + approval + "'");
-                    }
-                    const auto decision = execute(*approvalFunction, {stringValue("approve invocation of " + instruction.args.at(1))}, function.name);
-                    if (!asBool(decision)) {
-                        throw std::runtime_error("Approval denied");
-                    }
-                }
-                ++pc;
-            } else if (op == opcodeName(Opcode::kCheckLimits)) {
-                const auto memoryLimit = parseInteger(instruction.args.at(0));
-                const auto timeout = parseInteger(instruction.args.at(1));
-                const auto predictedStack = parseInteger(instruction.args.at(2));
-                if (memoryLimit <= 0 || timeout <= 0) {
-                    throw std::runtime_error("invalid call resource limits");
-                }
-                if (predictedStack > static_cast<Int>(options_.maxSteps)) {
-                    throw std::runtime_error("predicted stack depth exceeds VM limit");
-                }
-                ++pc;
-            } else if (op == opcodeName(Opcode::kCheckRole)) {
-                const auto* target = findFunction(program_, instruction.args.at(0));
-                if (target == nullptr) {
-                    throw std::runtime_error("unknown function '" + instruction.args.at(0) + "'");
-                }
-                const auto& chain = instruction.args.at(1);
-                requireRole(*target, chain);
-                ++pc;
-            } else if (op == opcodeName(Opcode::kCheckRoleIndirect)) {
-                const auto pointer = loadLocal(instruction.args.at(0));
-                if (pointer.kind != ValueKind::String) {
-                    throw std::runtime_error("function pointer '" + instruction.args.at(0) + "' is not assigned");
-                }
-                const auto* target = findFunction(program_, pointer.string);
-                if (target == nullptr) {
-                    throw std::runtime_error("unknown function '" + pointer.string + "'");
-                }
-                const auto& chain = instruction.args.at(1);
-                requireRole(*target, chain);
-                ++pc;
-            } else if (op == opcodeName(Opcode::kNullCheck)) {
-                const auto pointer = loadLocal(instruction.args.at(0));
-                if (pointer.kind != ValueKind::String || pointer.string.empty()) {
-                    throw std::runtime_error("null function pointer '" + instruction.args.at(0) + "'");
-                }
-                ++pc;
-            } else if (op == opcodeName(Opcode::kAssert)) {
-                if (!asBool(pop(stack))) {
-                    const auto label = instruction.args.empty() ? std::string{"anonymous obligation"} : instruction.args.front();
-                    throw std::runtime_error("proof obligation failed: " + label);
-                }
-                ++pc;
-            } else if (op == opcodeName(Opcode::kCall)) {
-                const auto* target = findFunction(program_, instruction.args.at(0));
-                if (target == nullptr) {
-                    throw std::runtime_error("unknown function '" + instruction.args.at(0) + "'");
-                }
-                const auto arity = toSize(parseInteger(instruction.args.at(1)));
-                std::vector<Value> args;
-                args.reserve(arity);
-                for (std::size_t i = 0; i < arity; ++i) {
-                    args.push_back(pop(stack));
-                }
-                std::reverse(args.begin(), args.end());
-                const auto ret = execute(*target, args, function.name);
-                if (target->returnable) {
-                    stack.push_back(ret);
-                }
-                ++pc;
-            } else if (op == opcodeName(Opcode::kCallIndirect)) {
-                const auto pointer = loadLocal(instruction.args.at(0));
-                if (pointer.kind != ValueKind::String) {
-                    throw std::runtime_error("function pointer '" + instruction.args.at(0) + "' is not assigned");
-                }
-                const auto* target = findFunction(program_, pointer.string);
-                if (target == nullptr) {
-                    throw std::runtime_error("unknown function '" + pointer.string + "'");
-                }
-                const auto arity = toSize(parseInteger(instruction.args.at(1)));
-                const bool discard = equalsSymbol(instruction.args.at(2), kInstructionTrue);
-                std::vector<Value> args;
-                args.reserve(arity);
-                for (std::size_t i = 0; i < arity; ++i) {
-                    args.push_back(pop(stack));
-                }
-                std::reverse(args.begin(), args.end());
-                const auto ret = execute(*target, args, function.name);
-                if (target->returnable && !discard) {
-                    stack.push_back(ret);
-                }
-                ++pc;
-            } else if (op == opcodeName(Opcode::kOutputInt)) {
-                output_ << intToString(asInteger(pop(stack))) << '\n';
-                ++pc;
-            } else if (op == opcodeName(Opcode::kOutputChar)) {
-                output_ << static_cast<char>(static_cast<unsigned char>(asInteger(pop(stack))));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kPrintLine)) {
-                output_ << valueToString(pop(stack)) << '\n';
-                ++pc;
-            } else if (op == opcodeName(Opcode::kInputInt)) {
-                long long value = 0;
-                input_ >> value;
-                stack.push_back(integerValue(value));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kInputChar)) {
-                char ch = '\0';
-                input_.get(ch);
-                stack.push_back(integerValue(static_cast<unsigned char>(ch)));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kVerifyEcc)) {
-                ++pc;
-            } else if (op == opcodeName(Opcode::kCopyMemory)) {
-                (void)pop(stack);
-                const auto src = pop(stack);
-                const auto dst = pop(stack);
-                if (src.kind != ValueKind::Ref || dst.kind != ValueKind::Ref) {
-                    throw std::runtime_error("copymemory expects reference arguments");
-                }
-                storeRef(dst, loadRef(src));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kCompareMemory)) {
-                (void)pop(stack);
-                const auto right = pop(stack);
-                const auto left = pop(stack);
-                if (left.kind != ValueKind::Ref || right.kind != ValueKind::Ref) {
-                    throw std::runtime_error("comparememory expects reference arguments");
-                }
-                stack.push_back(integerValue(equalsValue(loadRef(left), loadRef(right)) ? 0 : 1));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kRole)) {
-                applyRoleInstruction(instruction);
-                ++pc;
-            } else if (op == opcodeName(Opcode::kOperatorInput)) {
-                std::string answer;
-                input_ >> answer;
-                storeLocal(instruction.args.at(0), integerValue(equalsSymbol(answer, source_literal::kYes) ? 1 : 0));
-                ++pc;
-            } else if (op == opcodeName(Opcode::kReturn)) {
-                if (function.returnable && !stack.empty()) {
-                    return pop(stack);
-                }
-                return integerValue(0);
-            } else if (op == opcodeName(Opcode::kHalt)) {
-                return integerValue(0);
-            } else {
-                throw std::runtime_error("unknown opcode " + op);
-            }
-        }
-        return integerValue(0);
-    }
-
     const BytecodeProgram& program_;
     std::istream& input_;
     std::ostream& output_;
@@ -690,11 +151,511 @@ private:
     VmOptions options_;
     std::size_t steps_ = 0;
     std::size_t nextFrameId_ = 0;
-    std::unordered_map<std::string, Value> memory_;
+    Memory memory_;
     std::unordered_map<std::string, std::unordered_set<std::string>> chains_;
 };
 
-} // namespace
+// 栈操作处理器：处理压栈、出栈、加载、存储等指令
+class StackHandler : public InstructionHandler {
+public:
+    bool canHandle(const std::string& op) const override {
+        return op == opcodeName(Opcode::kPushInteger) ||
+               op == opcodeName(Opcode::kPushString) ||
+               op == opcodeName(Opcode::kPushNull) ||
+               op == opcodeName(Opcode::kPushReference) ||
+               op == opcodeName(Opcode::kDereference) ||
+               op == opcodeName(Opcode::kFieldReference) ||
+               op == opcodeName(Opcode::kLoad) ||
+               op == opcodeName(Opcode::kStore) ||
+               op == opcodeName(Opcode::kStoreDereference) ||
+               op == opcodeName(Opcode::kStorePointer) ||
+               op == opcodeName(Opcode::kPop);
+    }
+
+    HandlerResult execute(ExecutionContext& ctx) override {
+        const auto& op = ctx.instruction.op;
+        if (op == opcodeName(Opcode::kPushInteger)) {
+            ctx.stack.push_back(integerValue(parseInteger(ctx.instruction.args.at(0))));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kPushString)) {
+            ctx.stack.push_back(stringValue(hexDecode(ctx.instruction.args.at(0))));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kPushNull)) {
+            ctx.stack.push_back(nullValue());
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kPushReference)) {
+            ctx.stack.push_back(ctx.memory.ref(ctx.instruction.args.at(0), ctx.framePrefix));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kDereference)) {
+            const auto ref = pop(ctx.stack);
+            ctx.stack.push_back(ctx.memory.loadRef(ref));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kFieldReference)) {
+            auto ref = pop(ctx.stack);
+            if (ref.kind != ValueKind::Ref) {
+                throw std::runtime_error("cannot access field through non-reference value");
+            }
+            ref.string += ".";
+            ref.string += ctx.instruction.args.at(0);
+            ctx.stack.push_back(std::move(ref));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kLoad)) {
+            ctx.stack.push_back(ctx.memory.load(ctx.instruction.args.at(0), ctx.framePrefix));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kStore)) {
+            ctx.memory.store(ctx.instruction.args.at(0), ctx.framePrefix, pop(ctx.stack));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kStoreDereference)) {
+            const auto value = pop(ctx.stack);
+            const auto ref = pop(ctx.stack);
+            ctx.memory.storeRef(ref, value);
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kStorePointer)) {
+            ctx.memory.store(ctx.instruction.args.at(0), ctx.framePrefix, stringValue(ctx.instruction.args.at(1)));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kPop)) {
+            pop(ctx.stack);
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        return HandlerResult::NotMatched;
+    }
+};
+
+// 算术与逻辑处理器：处理加减乘除及其溢出策略、比较和逻辑运算
+class ArithmeticHandler : public InstructionHandler {
+public:
+    bool canHandle(const std::string& op) const override {
+        const auto [baseOp, policy] = splitOpPolicy(op);
+        (void)policy;
+        return baseOp == opcodeName(Opcode::kAdd) || baseOp == opcodeName(Opcode::kSub) ||
+               baseOp == opcodeName(Opcode::kMul) || baseOp == opcodeName(Opcode::kDiv) ||
+               op == opcodeName(Opcode::kEqual) || op == opcodeName(Opcode::kNotEqual) ||
+               op == opcodeName(Opcode::kLess) || op == opcodeName(Opcode::kLessEqual) ||
+               op == opcodeName(Opcode::kGreater) || op == opcodeName(Opcode::kGreaterEqual) ||
+               op == opcodeName(Opcode::kAnd) || op == opcodeName(Opcode::kOr) ||
+               op == opcodeName(Opcode::kXor) || op == opcodeName(Opcode::kNand) ||
+               op == opcodeName(Opcode::kNor) || op == opcodeName(Opcode::kNot);
+    }
+
+    HandlerResult execute(ExecutionContext& ctx) override {
+        const auto& op = ctx.instruction.op;
+        // NOT 指令是一元操作，单独处理
+        if (op == opcodeName(Opcode::kNot)) {
+            pushBool(ctx.stack, !asBool(pop(ctx.stack)));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        // 二元算术和逻辑操作
+        const auto [baseOp, policy] = splitOpPolicy(op);
+        const auto rightValue = pop(ctx.stack);
+        const auto leftValue = pop(ctx.stack);
+        const auto right = asInteger(rightValue);
+        const auto left = asInteger(leftValue);
+        if (baseOp == opcodeName(Opcode::kAdd)) {
+            if (leftValue.kind == ValueKind::String || rightValue.kind == ValueKind::String) {
+                ctx.stack.push_back(stringValue(leftValue.string + rightValue.string));
+            } else {
+                ctx.stack.push_back(integerValue(applyOverflowPolicy(left + right, policy)));
+            }
+        } else if (baseOp == opcodeName(Opcode::kSub)) {
+            ctx.stack.push_back(integerValue(applyOverflowPolicy(left - right, policy)));
+        } else if (baseOp == opcodeName(Opcode::kMul)) {
+            ctx.stack.push_back(integerValue(applyOverflowPolicy(left * right, policy)));
+        } else if (baseOp == opcodeName(Opcode::kDiv)) {
+            if (right == 0) {
+                throw std::runtime_error("division by zero");
+            }
+            ctx.stack.push_back(integerValue(applyOverflowPolicy(left / right, policy)));
+        } else if (op == opcodeName(Opcode::kEqual)) {
+            pushBool(ctx.stack, equalsValue(leftValue, rightValue));
+        } else if (op == opcodeName(Opcode::kNotEqual)) {
+            pushBool(ctx.stack, !equalsValue(leftValue, rightValue));
+        } else if (op == opcodeName(Opcode::kLess)) {
+            pushBool(ctx.stack, left < right);
+        } else if (op == opcodeName(Opcode::kLessEqual)) {
+            pushBool(ctx.stack, left <= right);
+        } else if (op == opcodeName(Opcode::kGreater)) {
+            pushBool(ctx.stack, left > right);
+        } else if (op == opcodeName(Opcode::kGreaterEqual)) {
+            pushBool(ctx.stack, left >= right);
+        } else if (op == opcodeName(Opcode::kAnd)) {
+            pushBool(ctx.stack, left != 0 && right != 0);
+        } else if (op == opcodeName(Opcode::kOr)) {
+            pushBool(ctx.stack, left != 0 || right != 0);
+        } else if (op == opcodeName(Opcode::kXor)) {
+            pushBool(ctx.stack, (left != 0) != (right != 0));
+        } else if (op == opcodeName(Opcode::kNand)) {
+            pushBool(ctx.stack, !(left != 0 && right != 0));
+        } else if (op == opcodeName(Opcode::kNor)) {
+            pushBool(ctx.stack, !(left != 0 || right != 0));
+        }
+        ++ctx.pc;
+        return HandlerResult::Continue;
+    }
+};
+
+// 控制流处理器：处理跳转、调用、返回等指令
+class ControlFlowHandler : public InstructionHandler {
+public:
+    bool canHandle(const std::string& op) const override {
+        return op == opcodeName(Opcode::kJump) ||
+               op == opcodeName(Opcode::kJumpIfZero) ||
+               op == opcodeName(Opcode::kCall) ||
+               op == opcodeName(Opcode::kCallIndirect) ||
+               op == opcodeName(Opcode::kReturn) ||
+               op == opcodeName(Opcode::kHalt);
+    }
+
+    HandlerResult execute(ExecutionContext& ctx) override {
+        const auto& op = ctx.instruction.op;
+        if (op == opcodeName(Opcode::kJump)) {
+            ctx.pc = toSize(parseInteger(ctx.instruction.args.at(0)));
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kJumpIfZero)) {
+            const auto target = toSize(parseInteger(ctx.instruction.args.at(0)));
+            ctx.pc = !asBool(pop(ctx.stack)) ? target : ctx.pc + 1;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kCall)) {
+            const auto* target = findFunction(ctx.interpreter.program_, ctx.instruction.args.at(0));
+            if (target == nullptr) {
+                throw std::runtime_error("unknown function '" + ctx.instruction.args.at(0) + "'");
+            }
+            const auto arity = toSize(parseInteger(ctx.instruction.args.at(1)));
+            std::vector<Value> args;
+            args.reserve(arity);
+            for (std::size_t i = 0; i < arity; ++i) {
+                args.push_back(pop(ctx.stack));
+            }
+            std::reverse(args.begin(), args.end());
+            const auto ret = ctx.interpreter.execute(*target, args, ctx.function.name);
+            if (target->returnable) {
+                ctx.stack.push_back(ret);
+            }
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kCallIndirect)) {
+            const auto pointer = ctx.memory.load(ctx.instruction.args.at(0), ctx.framePrefix);
+            if (pointer.kind != ValueKind::String) {
+                throw std::runtime_error("function pointer '" + ctx.instruction.args.at(0) + "' is not assigned");
+            }
+            const auto* target = findFunction(ctx.interpreter.program_, pointer.string);
+            if (target == nullptr) {
+                throw std::runtime_error("unknown function '" + pointer.string + "'");
+            }
+            const auto arity = toSize(parseInteger(ctx.instruction.args.at(1)));
+            const bool discard = equalsSymbol(ctx.instruction.args.at(2), kInstructionTrue);
+            std::vector<Value> args;
+            args.reserve(arity);
+            for (std::size_t i = 0; i < arity; ++i) {
+                args.push_back(pop(ctx.stack));
+            }
+            std::reverse(args.begin(), args.end());
+            const auto ret = ctx.interpreter.execute(*target, args, ctx.function.name);
+            if (target->returnable && !discard) {
+                ctx.stack.push_back(ret);
+            }
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kReturn)) {
+            if (ctx.function.returnable && !ctx.stack.empty()) {
+                ctx.returnValue = pop(ctx.stack);
+            } else {
+                ctx.returnValue = integerValue(0);
+            }
+            return HandlerResult::Return;
+        }
+        if (op == opcodeName(Opcode::kHalt)) {
+            ctx.returnValue = integerValue(0);
+            return HandlerResult::Return;
+        }
+        return HandlerResult::NotMatched;
+    }
+};
+
+// 输入输出处理器：处理输出、输入等指令
+class IoHandler : public InstructionHandler {
+public:
+    bool canHandle(const std::string& op) const override {
+        return op == opcodeName(Opcode::kOutputInt) ||
+               op == opcodeName(Opcode::kOutputChar) ||
+               op == opcodeName(Opcode::kPrintLine) ||
+               op == opcodeName(Opcode::kInputInt) ||
+               op == opcodeName(Opcode::kInputChar) ||
+               op == opcodeName(Opcode::kOperatorInput);
+    }
+
+    HandlerResult execute(ExecutionContext& ctx) override {
+        const auto& op = ctx.instruction.op;
+        if (op == opcodeName(Opcode::kOutputInt)) {
+            ctx.interpreter.output_ << intToString(asInteger(pop(ctx.stack))) << '\n';
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kOutputChar)) {
+            ctx.interpreter.output_ << static_cast<char>(static_cast<unsigned char>(asInteger(pop(ctx.stack))));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kPrintLine)) {
+            ctx.interpreter.output_ << valueToString(pop(ctx.stack)) << '\n';
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kInputInt)) {
+            long long value = 0;
+            ctx.interpreter.input_ >> value;
+            ctx.stack.push_back(integerValue(value));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kInputChar)) {
+            char ch = '\0';
+            ctx.interpreter.input_.get(ch);
+            ctx.stack.push_back(integerValue(static_cast<unsigned char>(ch)));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kOperatorInput)) {
+            std::string answer;
+            ctx.interpreter.input_ >> answer;
+            ctx.memory.store(ctx.instruction.args.at(0), ctx.framePrefix, integerValue(equalsSymbol(answer, source_literal::kYes) ? 1 : 0));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        return HandlerResult::NotMatched;
+    }
+};
+
+// 安全处理器：处理验证、权限检查、断言等指令
+class SecurityHandler : public InstructionHandler {
+public:
+    bool canHandle(const std::string& op) const override {
+        return op == opcodeName(Opcode::kVerify) ||
+               op == opcodeName(Opcode::kCheckApproval) ||
+               op == opcodeName(Opcode::kCheckLimits) ||
+               op == opcodeName(Opcode::kCheckRole) ||
+               op == opcodeName(Opcode::kCheckRoleIndirect) ||
+               op == opcodeName(Opcode::kNullCheck) ||
+               op == opcodeName(Opcode::kAssert) ||
+               op == opcodeName(Opcode::kRole) ||
+               op == opcodeName(Opcode::kVerifyEcc) ||
+               op == opcodeName(Opcode::kCopyMemory) ||
+               op == opcodeName(Opcode::kCompareMemory);
+    }
+
+    HandlerResult execute(ExecutionContext& ctx) override {
+        const auto& op = ctx.instruction.op;
+        if (op == opcodeName(Opcode::kVerify)) {
+            const auto actual = functionFingerprint(ctx.function);
+            if (actual != ctx.function.hash) {
+                throw std::runtime_error("Function identity verification failed for " + ctx.function.name);
+            }
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kCheckApproval)) {
+            const auto& approval = ctx.instruction.args.at(0);
+            if (equalsSymbol(approval, builtin::kAlwaysDeny)) {
+                throw std::runtime_error("Approval denied");
+            }
+            if (!equalsSymbol(approval, builtin::kAlwaysApprove)) {
+                const auto* approvalFunction = findFunction(ctx.interpreter.program_, approval);
+                if (approvalFunction == nullptr || !equalsSymbol(approvalFunction->category, function_category::kApproval)) {
+                    throw std::runtime_error("Unknown approval function '" + approval + "'");
+                }
+                const auto decision = ctx.interpreter.execute(*approvalFunction, {stringValue("approve invocation of " + ctx.instruction.args.at(1))}, ctx.function.name);
+                if (!asBool(decision)) {
+                    throw std::runtime_error("Approval denied");
+                }
+            }
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kCheckLimits)) {
+            const auto memoryLimit = parseInteger(ctx.instruction.args.at(0));
+            const auto timeout = parseInteger(ctx.instruction.args.at(1));
+            const auto predictedStack = parseInteger(ctx.instruction.args.at(2));
+            if (memoryLimit <= 0 || timeout <= 0) {
+                throw std::runtime_error("invalid call resource limits");
+            }
+            if (predictedStack > static_cast<Int>(ctx.interpreter.options_.maxSteps)) {
+                throw std::runtime_error("predicted stack depth exceeds VM limit");
+            }
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kCheckRole)) {
+            const auto* target = findFunction(ctx.interpreter.program_, ctx.instruction.args.at(0));
+            if (target == nullptr) {
+                throw std::runtime_error("unknown function '" + ctx.instruction.args.at(0) + "'");
+            }
+            const auto& chain = ctx.instruction.args.at(1);
+            ctx.interpreter.requireRole(*target, chain);
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kCheckRoleIndirect)) {
+            const auto pointer = ctx.memory.load(ctx.instruction.args.at(0), ctx.framePrefix);
+            if (pointer.kind != ValueKind::String) {
+                throw std::runtime_error("function pointer '" + ctx.instruction.args.at(0) + "' is not assigned");
+            }
+            const auto* target = findFunction(ctx.interpreter.program_, pointer.string);
+            if (target == nullptr) {
+                throw std::runtime_error("unknown function '" + pointer.string + "'");
+            }
+            const auto& chain = ctx.instruction.args.at(1);
+            ctx.interpreter.requireRole(*target, chain);
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kNullCheck)) {
+            const auto pointer = ctx.memory.load(ctx.instruction.args.at(0), ctx.framePrefix);
+            if (pointer.kind != ValueKind::String || pointer.string.empty()) {
+                throw std::runtime_error("null function pointer '" + ctx.instruction.args.at(0) + "'");
+            }
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kAssert)) {
+            if (!asBool(pop(ctx.stack))) {
+                const auto label = ctx.instruction.args.empty() ? std::string{"anonymous obligation"} : ctx.instruction.args.front();
+                throw std::runtime_error("proof obligation failed: " + label);
+            }
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kRole)) {
+            ctx.interpreter.applyRoleInstruction(ctx.instruction);
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kVerifyEcc)) {
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kCopyMemory)) {
+            (void)pop(ctx.stack);
+            const auto src = pop(ctx.stack);
+            const auto dst = pop(ctx.stack);
+            if (src.kind != ValueKind::Ref || dst.kind != ValueKind::Ref) {
+                throw std::runtime_error("copymemory expects reference arguments");
+            }
+            ctx.memory.storeRef(dst, ctx.memory.loadRef(src));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        if (op == opcodeName(Opcode::kCompareMemory)) {
+            (void)pop(ctx.stack);
+            const auto right = pop(ctx.stack);
+            const auto left = pop(ctx.stack);
+            if (left.kind != ValueKind::Ref || right.kind != ValueKind::Ref) {
+                throw std::runtime_error("comparememory expects reference arguments");
+            }
+            ctx.stack.push_back(integerValue(equalsValue(ctx.memory.loadRef(left), ctx.memory.loadRef(right)) ? 0 : 1));
+            ++ctx.pc;
+            return HandlerResult::Continue;
+        }
+        return HandlerResult::NotMatched;
+    }
+};
+
+// 解释器执行方法：使用处理器分派执行指令
+Value Interpreter::execute(const FunctionBytecode& function, const std::vector<Value>& args, const std::string& caller) {
+    if (args.size() != function.params.size()) {
+        throw std::runtime_error("function '" + function.name + "' expected " + std::to_string(function.params.size()) +
+            " arguments but got " + std::to_string(args.size()));
+    }
+    if (!function.callableFrom.empty() && !caller.empty() &&
+        std::find(function.callableFrom.begin(), function.callableFrom.end(), caller) == function.callableFrom.end()) {
+        throw std::runtime_error("function '" + function.name + "' is not callable from '" + caller + "'");
+    }
+    std::vector<Value> stack;
+    const auto framePrefix = function.name + "#" + std::to_string(nextFrameId_++) + ":";
+    for (const auto& local : function.locals) {
+        memory_.ensureAddress(local, framePrefix);
+    }
+    for (std::size_t i = 0; i < function.params.size(); ++i) {
+        memory_.store(function.params[i], framePrefix, args[i]);
+    }
+
+    // 创建处理器实例
+    StackHandler stackHandler;
+    ArithmeticHandler arithHandler;
+    ControlFlowHandler controlHandler;
+    IoHandler ioHandler;
+    SecurityHandler securityHandler;
+
+    std::size_t pc = 0;
+    while (pc < function.code.size()) {
+        if (++steps_ > options_.maxSteps) {
+            throw std::runtime_error("VM step limit exceeded");
+        }
+        if (stack.size() > static_cast<std::size_t>(function.maxStackSize)) {
+            throw std::runtime_error("max stack size exceeded in function " + function.name);
+        }
+        const auto& instruction = function.code[pc];
+        const auto& op = instruction.op;
+
+        // 构建执行上下文，传递所有运行时状态给处理器
+        ExecutionContext ctx{stack, memory_, framePrefix, instruction, function, caller, pc, *this, Value{}};
+
+        // 按类别分派到对应处理器
+        if (stackHandler.canHandle(op)) {
+            const auto result = stackHandler.execute(ctx);
+            if (result == HandlerResult::Return) {
+                return ctx.returnValue;
+            }
+        } else if (arithHandler.canHandle(op)) {
+            const auto result = arithHandler.execute(ctx);
+            if (result == HandlerResult::Return) {
+                return ctx.returnValue;
+            }
+        } else if (controlHandler.canHandle(op)) {
+            const auto result = controlHandler.execute(ctx);
+            if (result == HandlerResult::Return) {
+                return ctx.returnValue;
+            }
+        } else if (ioHandler.canHandle(op)) {
+            const auto result = ioHandler.execute(ctx);
+            if (result == HandlerResult::Return) {
+                return ctx.returnValue;
+            }
+        } else if (securityHandler.canHandle(op)) {
+            const auto result = securityHandler.execute(ctx);
+            if (result == HandlerResult::Return) {
+                return ctx.returnValue;
+            }
+        } else {
+            throw std::runtime_error("unknown opcode " + op);
+        }
+    }
+    return integerValue(0);
+}
 
 bool runBytecode(const BytecodeProgram& program, std::istream& input, std::ostream& output, Diagnostics& diagnostics, VmOptions options) {
     Interpreter interpreter(program, input, output, diagnostics, options);

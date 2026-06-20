@@ -1,4 +1,5 @@
 #include "compiler/ast.h"
+#include "compiler/ast_visitor.h"
 
 #include <sstream>
 
@@ -91,6 +92,30 @@ std::string summarizeProgram(const Program& program) {
             << " methods=" << structure.methods.size() << '\n';
     }
     return out.str();
+}
+
+void Program::accept(AstVisitor& visitor) const {
+    visitor.visit(*this);
+}
+
+void FunctionDecl::accept(AstVisitor& visitor) const {
+    visitor.visit(*this);
+}
+
+void StructDecl::accept(AstVisitor& visitor) const {
+    visitor.visit(*this);
+}
+
+void VarDecl::accept(AstVisitor& visitor) const {
+    visitor.visit(*this);
+}
+
+void Statement::accept(AstVisitor& visitor) const {
+    visitor.visit(*this);
+}
+
+void Expr::accept(AstVisitor& visitor) const {
+    visitor.visit(*this);
 }
 
 } // namespace torture::compiler

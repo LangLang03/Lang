@@ -1,7 +1,14 @@
-#include "vm/bytecode.h"
+// windows-arm64 平台字节码序列化实现
+// 使用小端编码，字段顺序与现有 bytecode_binary.cc 和 windows_arm32 不同：
+// magic(4) -> flags(2 LE) -> version(2 LE) -> platform_id(1) -> byte_order(1)
+//        -> producer -> entry -> env_fingerprint -> functions
 
+#include "vm/bytecode.h"
 #include "vm/platform.h"
-#include "vm/platform_bytecode.h"
+#include "vm/platforms/platform_bytecode_windows_arm64.h"
+#include "vm/bytecode_format.h"
+#include "vm/environment.h"
+#include "common/diagnostic.h"
 
 #include <array>
 #include <istream>
@@ -75,6 +82,7 @@ std::uint32_t CheckedNonNegative(int value, std::string_view label) {
   return static_cast<std::uint32_t>(value);
 }
 
+// 小端字节码写入器
 class BytecodeWriter {
  public:
   explicit BytecodeWriter(std::ostream& output) : output_(output) {}
@@ -116,6 +124,7 @@ class BytecodeWriter {
   std::ostream& output_;
 };
 
+// 小端字节码读取器
 class BytecodeReader {
  public:
   BytecodeReader(std::istream& input, std::string name, Diagnostics& diagnostics)
@@ -337,23 +346,30 @@ void AddBytecodeError(Diagnostics& diagnostics, std::string_view code, const std
 
 }  // namespace
 
+// windows-arm64 序列化格式（小端，字段顺序与现有不同）：
+// [0..3]   4 字节魔数
+// [4..5]   2 字节 flags (little-endian)
+// [6..7]   2 字节 version (little-endian)
+// [8]      1 字节 platform_id
+// [9]      1 字节 byte_order
+// [10..]   producer -> entry -> env_fingerprint -> functions
 void writeBytecode(std::ostream& output, const BytecodeProgram& program) {
   BytecodeWriter writer{output};
-  // [0..3]   4 字节魔数
+  // [0..3] 4 字节魔数
   output.write(platform_bytecode::kMagicBytes.data(),
                static_cast<std::streamsize>(platform_bytecode::kMagicBytes.size()));
-  // [4]      1 字节 platform id
-  writer.WriteRawByte(platform_bytecode::kPlatformId);
-  // [5..6]   2 字节 version (little-endian)
-  writer.WriteLittleEndian(platform_bytecode::kVersion);
-  // [7..8]   2 字节 flags (little-endian)
+  // [4..5] 2 字节 flags (little-endian)
   writer.WriteLittleEndian(platform_bytecode::kFlags);
-  // [9]      1 字节字节序标签
+  // [6..7] 2 字节 version (little-endian)
+  writer.WriteLittleEndian(platform_bytecode::kVersion);
+  // [8] 1 字节 platform_id
+  writer.WriteRawByte(platform_bytecode::kPlatformId);
+  // [9] 1 字节 byte_order
   writer.WriteRawByte(static_cast<std::uint8_t>(kPlatformByteOrderLabel));
-  // [10..]   environmentFingerprint / producer / entry / functions
-  writer.WriteString(program.environmentFingerprint.empty() ? currentEnvironmentFingerprint() : program.environmentFingerprint);
+  // [10..] producer -> entry -> env_fingerprint -> functions
   writer.WriteString(program.producer.empty() ? environmentSummary() : program.producer);
   writer.WriteString(program.entry);
+  writer.WriteString(program.environmentFingerprint.empty() ? currentEnvironmentFingerprint() : program.environmentFingerprint);
   writer.WriteLittleEndian(CheckedCount(program.functions.size(), kFunctionVectorLabel));
   for (const auto& function : program.functions) {
     WriteFunction(writer, function);
@@ -367,6 +383,31 @@ std::optional<BytecodeProgram> readBytecode(std::istream& input, const std::stri
     return std::nullopt;
   }
 
+  // [4..5] flags (little-endian)
+  const auto flags = reader.ReadLittleEndian<std::uint16_t>(field_name::kFlags);
+  if (!flags) {
+    return std::nullopt;
+  }
+  if (*flags != platform_bytecode::kFlags) {
+    AddBytecodeError(diagnostics, bytecode_diagnostic::kUnsupportedFlags, name, "bytecode uses unsupported flags");
+    return std::nullopt;
+  }
+
+  // [6..7] version (little-endian)
+  const auto version = reader.ReadLittleEndian<std::uint16_t>(field_name::kVersion);
+  if (!version) {
+    return std::nullopt;
+  }
+  if (*version != platform_bytecode::kVersion) {
+    AddBytecodeError(
+        diagnostics,
+        bytecode_diagnostic::kUnsupportedVersion,
+        name,
+        "bytecode format version " + std::to_string(*version) + " is not supported by this VM");
+    return std::nullopt;
+  }
+
+  // [8] platform_id
   const auto platform_id = reader.ReadByte(field_name::kPlatformId);
   if (!platform_id) {
     return std::nullopt;
@@ -382,24 +423,7 @@ std::optional<BytecodeProgram> readBytecode(std::istream& input, const std::stri
     return std::nullopt;
   }
 
-  const auto version = reader.ReadLittleEndian<std::uint16_t>(field_name::kVersion);
-  const auto flags = reader.ReadLittleEndian<std::uint16_t>(field_name::kFlags);
-  if (!version || !flags) {
-    return std::nullopt;
-  }
-  if (*version != platform_bytecode::kVersion) {
-    AddBytecodeError(
-        diagnostics,
-        bytecode_diagnostic::kUnsupportedVersion,
-        name,
-        "bytecode format version " + std::to_string(*version) + " is not supported by this VM");
-    return std::nullopt;
-  }
-  if (*flags != platform_bytecode::kFlags) {
-    AddBytecodeError(diagnostics, bytecode_diagnostic::kUnsupportedFlags, name, "bytecode uses unsupported flags");
-    return std::nullopt;
-  }
-
+  // [9] byte_order
   const auto byte_order = reader.ReadByte(field_name::kByteOrderLabel);
   if (!byte_order) {
     return std::nullopt;
@@ -414,13 +438,14 @@ std::optional<BytecodeProgram> readBytecode(std::istream& input, const std::stri
     return std::nullopt;
   }
 
-  auto fingerprint = reader.ReadString(field_name::kEnvironmentFingerprint);
+  // [10..] producer -> entry -> env_fingerprint -> functions
   auto producer = reader.ReadString(field_name::kProducer);
   auto entry = reader.ReadString(field_name::kEntry);
-  const auto function_count = reader.ReadLittleEndian<std::uint32_t>(field_name::kFunctionCount);
-  if (!fingerprint || !producer || !entry || !function_count) {
+  auto fingerprint = reader.ReadString(field_name::kEnvironmentFingerprint);
+  if (!producer || !entry || !fingerprint) {
     return std::nullopt;
   }
+
   if (!matchesCurrentEnvironment(*fingerprint)) {
     AddBytecodeError(
         diagnostics,
@@ -431,6 +456,11 @@ std::optional<BytecodeProgram> readBytecode(std::istream& input, const std::stri
             " (platform '" + std::string{kPlatformName} + "')");
     return std::nullopt;
   }
+
+  const auto function_count = reader.ReadLittleEndian<std::uint32_t>(field_name::kFunctionCount);
+  if (!function_count) {
+    return std::nullopt;
+  }
   if (*function_count > bytecode_format::kMaxCollectionItems) {
     AddBytecodeError(diagnostics, bytecode_diagnostic::kCollectionTooLarge, name, "function vector exceeds bytecode limit");
     return std::nullopt;
@@ -438,9 +468,9 @@ std::optional<BytecodeProgram> readBytecode(std::istream& input, const std::stri
 
   BytecodeProgram program;
   program.platformId = *platform_id;
-  program.environmentFingerprint = std::move(*fingerprint);
   program.producer = std::move(*producer);
   program.entry = std::move(*entry);
+  program.environmentFingerprint = std::move(*fingerprint);
   program.functions.reserve(*function_count);
   for (std::uint32_t index = 0; index < *function_count; ++index) {
     auto function = ReadFunction(reader);
@@ -449,6 +479,7 @@ std::optional<BytecodeProgram> readBytecode(std::istream& input, const std::stri
     }
     program.functions.push_back(std::move(*function));
   }
+
   return program;
 }
 

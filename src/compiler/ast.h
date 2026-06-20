@@ -10,6 +10,8 @@
 
 namespace torture::compiler {
 
+class AstVisitor;
+
 struct TypeName {
     std::string text;
 };
@@ -83,6 +85,8 @@ struct Expr {
     ExprPtr operatorReason;
     std::vector<GateOp> gateOps;
     AuthorizeCall authorizeCall;
+
+    void accept(AstVisitor& visitor) const;
 };
 
 ExprPtr makeExpr(ExprKind kind, SourceLocation location, std::string text = {});
@@ -98,6 +102,8 @@ struct VarDecl {
     std::string name;
     ExprPtr initializer;
     SourceLocation location;
+
+    void accept(AstVisitor& visitor) const;
 };
 
 struct AssignStmt {
@@ -206,6 +212,8 @@ struct Statement {
     std::vector<FormalClause> formalClauses;
     std::vector<StatementPtr> thenBody;
     std::vector<StatementPtr> elseBody;
+
+    void accept(AstVisitor& visitor) const;
 };
 
 StatementPtr makeStatement(StatementKind kind, SourceLocation location);
@@ -240,6 +248,8 @@ struct FunctionDecl {
     std::vector<std::string> allowedRoles;
     std::vector<StatementPtr> body;
     SourceLocation location;
+
+    void accept(AstVisitor& visitor) const;
 };
 
 struct StructDecl {
@@ -257,12 +267,16 @@ struct StructDecl {
     std::vector<VarDecl> fields;
     std::vector<FunctionDecl> methods;
     SourceLocation location;
+
+    void accept(AstVisitor& visitor) const;
 };
 
 struct Program {
     bool requireEcc = false;
     std::vector<FunctionDecl> functions;
     std::vector<StructDecl> structs;
+
+    void accept(AstVisitor& visitor) const;
 };
 
 std::string summarizeProgram(const Program& program);

@@ -1,0 +1,26 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+ColumnLimit: 120
+
+BreakBeforeBraces: Attach
+
+PointerAlignment: Left
+DerivePointerAlignment: false
+
+NamespaceIndentation: None
+
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<.*>$'
+    Priority: 1
+  - Regex: '^".*"$'
+    Priority: 2
+SortIncludes: CaseSensitive
+
+AlignTrailingComments: true
