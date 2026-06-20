@@ -1,3 +1,4 @@
 build/
 *.tbc
 *.kdev4
+.trae/

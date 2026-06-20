@@ -192,11 +192,29 @@ Int applyOverflowPolicy(Int value, const std::string& policy) {
 }
 
 std::pair<std::string, std::string> splitOpPolicy(const std::string& op) {
-    const auto pos = op.find('_');
-    if (pos == std::string::npos) {
-        return {op, ""};
+    // 输入示例："ADD_LX64"、"ADD_trap_LX64"、"ADD_wrap_LX64"。
+    // 目标：baseOp = "ADD_LX64"（保留平台后缀），policy = "" 或 "trap"/"wrap"/...
+    // 做法：剥掉末尾平台后缀（"_LX64"），按 '_' 拆分；再把平台后缀拼回 base。
+    constexpr std::string_view kPlatformSuffix = torture::vm::platform_bytecode::kPlatformSuffix;
+    std::string suffix{std::string{kPlatformSuffix.size(), '_'}.append(std::string{kPlatformSuffix})};
+    std::string stripped = op;
+    std::string platformTail;
+    if (stripped.size() > suffix.size() &&
+        stripped.compare(stripped.size() - kPlatformSuffix.size(), kPlatformSuffix.size(), kPlatformSuffix) == 0 &&
+        stripped[stripped.size() - kPlatformSuffix.size() - 1] == '_') {
+        platformTail.assign(kPlatformSuffix);
+        stripped.erase(stripped.size() - kPlatformSuffix.size() - 1);
     }
-    return {op.substr(0, pos), op.substr(pos + 1)};
+    const auto pos = stripped.find('_');
+    if (pos == std::string::npos) {
+        if (platformTail.empty()) {
+            return {stripped, ""};
+        }
+        return {stripped + "_" + platformTail, ""};
+    }
+    std::string base = stripped.substr(0, pos) + (platformTail.empty() ? "" : "_" + platformTail);
+    std::string policy = stripped.substr(pos + 1);
+    return {base, policy};
 }
 
 int hexDigit(char ch) {
@@ -254,6 +272,16 @@ public:
     }
 
     bool run() {
+        if (program_.platformId != kPlatformId) {
+            diagnostics_.error(
+                std::string{bytecode_format::kDiagnosticDomain},
+                std::string{bytecode_diagnostic::kPlatformMismatch},
+                SourceLocation{"<bytecode>", 1, 1},
+                "bytecode platform id " + std::to_string(static_cast<unsigned>(program_.platformId)) +
+                    " does not match current platform " + std::to_string(static_cast<unsigned>(kPlatformId)) +
+                    " ('" + std::string{kPlatformName} + "')");
+            return false;
+        }
         if (!matchesCurrentEnvironment(program_.environmentFingerprint)) {
             diagnostics_.error(
                 "vm",

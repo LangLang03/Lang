@@ -1,6 +1,7 @@
 #include "vm/environment.h"
 
 #include "common/sha256.h"
+#include "vm/platform.h"
 
 #include <bit>
 #include <sstream>
@@ -74,6 +75,9 @@ std::string environmentSummary() {
     std::ostringstream out;
     out << "contract=" << kRuntimeContract << '\n';
     out << "bytecode-format=" << TORTURE_BYTECODE_FORMAT_VERSION << '\n';
+    out << "platform-id=" << static_cast<unsigned>(torture::vm::kPlatformId) << '\n';
+    out << "platform-name=" << torture::vm::kPlatformName << '\n';
+    out << "platform-byte-order=" << torture::vm::kPlatformByteOrderLabel << '\n';
     out << "compiler-id=" << TORTURE_BUILD_COMPILER_ID << '\n';
     out << "compiler-version=" << TORTURE_BUILD_COMPILER_VERSION << '\n';
     out << "system-name=" << TORTURE_BUILD_SYSTEM_NAME << '\n';

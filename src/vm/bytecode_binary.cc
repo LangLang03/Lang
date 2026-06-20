@@ -1,5 +1,8 @@
 #include "vm/bytecode.h"
 
+#include "vm/platform.h"
+#include "vm/platform_bytecode.h"
+
 #include <array>
 #include <istream>
 #include <limits>
@@ -18,6 +21,7 @@ namespace field_name {
 
 constexpr std::string_view kEnvironmentFingerprint = "environment-fingerprint";
 constexpr std::string_view kEntry = "entry";
+constexpr std::string_view kByteOrderLabel = "byte-order-label";
 constexpr std::string_view kFlags = "flags";
 constexpr std::string_view kFunctionCallableFrom = "function-callable-from";
 constexpr std::string_view kFunctionCategory = "function-category";
@@ -34,6 +38,7 @@ constexpr std::string_view kFunctionSecurityLevel = "function-security-level";
 constexpr std::string_view kInstructionArgs = "instruction-args";
 constexpr std::string_view kInstructionCount = "instruction-count";
 constexpr std::string_view kOpcode = "opcode";
+constexpr std::string_view kPlatformId = "platform-id";
 constexpr std::string_view kProducer = "producer";
 constexpr std::string_view kStringVector = "string vector";
 constexpr std::string_view kVersion = "version";
@@ -85,6 +90,10 @@ class BytecodeWriter {
     }
   }
 
+  void WriteRawByte(std::uint8_t value) {
+    output_.put(static_cast<char>(value));
+  }
+
   void WriteString(std::string_view text) {
     WriteLittleEndian(CheckedStringSize(text.size()));
     output_.write(text.data(), static_cast<std::streamsize>(text.size()));
@@ -113,14 +122,14 @@ class BytecodeReader {
       : input_(input), name_(std::move(name)), diagnostics_(diagnostics) {}
 
   bool ReadMagic() {
-    std::array<char, bytecode_format::kMagicBytes.size()> actual = {};
+    std::array<char, platform_bytecode::kMagicBytes.size()> actual = {};
     if (!ReadRaw(actual.data(), actual.size())) {
       return Fail(bytecode_diagnostic::kBadMagic, "not a Torture binary bytecode file");
     }
-    if (actual != bytecode_format::kMagicBytes) {
+    if (actual != platform_bytecode::kMagicBytes) {
       return Fail(
           bytecode_diagnostic::kBadMagic,
-          "not a Torture binary bytecode v" + std::to_string(bytecode_format::kVersion) + " file");
+          "bytecode magic does not match this platform '" + std::string{kPlatformName} + "'");
     }
     return true;
   }
@@ -243,9 +252,11 @@ std::optional<Instruction> ReadInstruction(BytecodeReader& reader) {
   if (!raw_opcode) {
     return std::nullopt;
   }
-  const auto name = opcodeName(static_cast<Opcode>(*raw_opcode));
+  const auto name = platform_bytecode::opcodeNameForOpcodeId(*raw_opcode);
   if (name.empty()) {
-    reader.Fail(bytecode_diagnostic::kUnknownOpcode, "bytecode contains unknown opcode id " + std::to_string(*raw_opcode));
+    reader.Fail(bytecode_diagnostic::kUnknownOpcode,
+                "bytecode contains unknown opcode id " + std::to_string(*raw_opcode) +
+                    " for platform '" + std::string{kPlatformName} + "'");
     return std::nullopt;
   }
   Instruction instruction;
@@ -328,9 +339,18 @@ void AddBytecodeError(Diagnostics& diagnostics, std::string_view code, const std
 
 void writeBytecode(std::ostream& output, const BytecodeProgram& program) {
   BytecodeWriter writer{output};
-  output.write(bytecode_format::kMagicBytes.data(), static_cast<std::streamsize>(bytecode_format::kMagicBytes.size()));
-  writer.WriteLittleEndian(bytecode_format::kVersion);
-  writer.WriteLittleEndian(bytecode_format::kFlags);
+  // [0..3]   4 字节魔数
+  output.write(platform_bytecode::kMagicBytes.data(),
+               static_cast<std::streamsize>(platform_bytecode::kMagicBytes.size()));
+  // [4]      1 字节 platform id
+  writer.WriteRawByte(platform_bytecode::kPlatformId);
+  // [5..6]   2 字节 version (little-endian)
+  writer.WriteLittleEndian(platform_bytecode::kVersion);
+  // [7..8]   2 字节 flags (little-endian)
+  writer.WriteLittleEndian(platform_bytecode::kFlags);
+  // [9]      1 字节字节序标签
+  writer.WriteRawByte(static_cast<std::uint8_t>(kPlatformByteOrderLabel));
+  // [10..]   environmentFingerprint / producer / entry / functions
   writer.WriteString(program.environmentFingerprint.empty() ? currentEnvironmentFingerprint() : program.environmentFingerprint);
   writer.WriteString(program.producer.empty() ? environmentSummary() : program.producer);
   writer.WriteString(program.entry);
@@ -347,16 +367,27 @@ std::optional<BytecodeProgram> readBytecode(std::istream& input, const std::stri
     return std::nullopt;
   }
 
-  const auto version = reader.ReadLittleEndian<std::uint16_t>(field_name::kVersion);
-  const auto flags = reader.ReadLittleEndian<std::uint16_t>(field_name::kFlags);
-  auto fingerprint = reader.ReadString(field_name::kEnvironmentFingerprint);
-  auto producer = reader.ReadString(field_name::kProducer);
-  auto entry = reader.ReadString(field_name::kEntry);
-  const auto function_count = reader.ReadLittleEndian<std::uint32_t>(field_name::kFunctionCount);
-  if (!version || !flags || !fingerprint || !producer || !entry || !function_count) {
+  const auto platform_id = reader.ReadByte(field_name::kPlatformId);
+  if (!platform_id) {
     return std::nullopt;
   }
-  if (*version != bytecode_format::kVersion) {
+  if (*platform_id != platform_bytecode::kPlatformId) {
+    AddBytecodeError(
+        diagnostics,
+        bytecode_diagnostic::kPlatformMismatch,
+        name,
+        "bytecode platform id " + std::to_string(*platform_id) +
+            " does not match current platform " + std::to_string(platform_bytecode::kPlatformId) +
+            " ('" + std::string{kPlatformName} + "')");
+    return std::nullopt;
+  }
+
+  const auto version = reader.ReadLittleEndian<std::uint16_t>(field_name::kVersion);
+  const auto flags = reader.ReadLittleEndian<std::uint16_t>(field_name::kFlags);
+  if (!version || !flags) {
+    return std::nullopt;
+  }
+  if (*version != platform_bytecode::kVersion) {
     AddBytecodeError(
         diagnostics,
         bytecode_diagnostic::kUnsupportedVersion,
@@ -364,8 +395,30 @@ std::optional<BytecodeProgram> readBytecode(std::istream& input, const std::stri
         "bytecode format version " + std::to_string(*version) + " is not supported by this VM");
     return std::nullopt;
   }
-  if (*flags != bytecode_format::kFlags) {
+  if (*flags != platform_bytecode::kFlags) {
     AddBytecodeError(diagnostics, bytecode_diagnostic::kUnsupportedFlags, name, "bytecode uses unsupported flags");
+    return std::nullopt;
+  }
+
+  const auto byte_order = reader.ReadByte(field_name::kByteOrderLabel);
+  if (!byte_order) {
+    return std::nullopt;
+  }
+  if (static_cast<char>(*byte_order) != kPlatformByteOrderLabel) {
+    AddBytecodeError(
+        diagnostics,
+        bytecode_diagnostic::kEndianMismatch,
+        name,
+        "bytecode byte order label '" + std::string(1, static_cast<char>(*byte_order)) +
+            "' does not match current platform '" + std::string(1, kPlatformByteOrderLabel) + "'");
+    return std::nullopt;
+  }
+
+  auto fingerprint = reader.ReadString(field_name::kEnvironmentFingerprint);
+  auto producer = reader.ReadString(field_name::kProducer);
+  auto entry = reader.ReadString(field_name::kEntry);
+  const auto function_count = reader.ReadLittleEndian<std::uint32_t>(field_name::kFunctionCount);
+  if (!fingerprint || !producer || !entry || !function_count) {
     return std::nullopt;
   }
   if (!matchesCurrentEnvironment(*fingerprint)) {
@@ -374,7 +427,8 @@ std::optional<BytecodeProgram> readBytecode(std::istream& input, const std::stri
         bytecode_diagnostic::kEnvironmentMismatch,
         name,
         "bytecode environment " + shortFingerprint(*fingerprint) +
-            " does not match current compiler environment " + shortFingerprint(currentEnvironmentFingerprint()));
+            " does not match current compiler environment " + shortFingerprint(currentEnvironmentFingerprint()) +
+            " (platform '" + std::string{kPlatformName} + "')");
     return std::nullopt;
   }
   if (*function_count > bytecode_format::kMaxCollectionItems) {
@@ -383,6 +437,7 @@ std::optional<BytecodeProgram> readBytecode(std::istream& input, const std::stri
   }
 
   BytecodeProgram program;
+  program.platformId = *platform_id;
   program.environmentFingerprint = std::move(*fingerprint);
   program.producer = std::move(*producer);
   program.entry = std::move(*entry);

@@ -21,6 +21,9 @@ add_library(torture_common
 target_include_directories(torture_common PUBLIC src)
 
 add_library(torture_vm
+    src/vm/platform.cpp
+    src/vm/platform_bytecode.cpp
+    src/vm/platform_vm.cpp
     src/vm/bytecode_binary.cc
     src/vm/bytecode.cpp
     src/vm/environment.cpp

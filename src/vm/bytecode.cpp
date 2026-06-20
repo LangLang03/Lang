@@ -1,6 +1,7 @@
 #include "vm/bytecode.h"
 
 #include "common/sha256.h"
+#include "vm/platform.h"
 
 #include <sstream>
 #include <string_view>
@@ -54,7 +55,8 @@ void finalizeFunctionHash(FunctionBytecode& function) {
 
 std::string inspectBytecode(const BytecodeProgram& program) {
     std::ostringstream out;
-    out << "format: " << bytecode_format::kMagicText << " v" << bytecode_format::kVersion << '\n';
+    out << "format: " << bytecode_format::kMagicText << " v" << bytecode_format::kVersion
+        << " platform=" << kPlatformName << '\n';
     out << "environment: " << shortFingerprint(program.environmentFingerprint) << '\n';
     out << "entry: " << program.entry << '\n';
     out << "functions: " << program.functions.size() << '\n';

@@ -29,6 +29,7 @@ struct FunctionBytecode {
 };
 
 struct BytecodeProgram {
+    std::uint8_t platformId = kPlatformId;
     std::string environmentFingerprint = currentEnvironmentFingerprint();
     std::string producer = environmentSummary();
     std::string entry = std::string{source_function::kMain};
