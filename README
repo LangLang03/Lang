@@ -1,0 +1,686 @@
+# TortureLang — The Definitive Programming Language for Mission-Critical Systems
+
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=for-the-badge)](https://github.com/LangLang03/Lang)
+[![C++23](https://img.shields.io/badge/C%2B%2B-23-blue?style=for-the-badge&logo=cplusplus)](https://en.cppreference.com/w/cpp/23)
+[![Platform Support](https://img.shields.io/badge/platforms-12-orange?style=for-the-badge)](https://github.com/LangLang03/Lang)
+[![Bytecode Format](https://img.shields.io/badge/bytecode-v3-purple?style=for-the-badge)](https://github.com/LangLang03/Lang)
+[![Security Level](https://img.shields.io/badge/security-level%201-red?style=for-the-badge)](https://github.com/LangLang03/Lang)
+[![License](https://img.shields.io/badge/license-proprietary-lightgrey?style=for-the-badge)](https://github.com/LangLang03/Lang)
+[![WORA Compliant](https://img.shields.io/badge/WORA-Write%20Once%20Reject%20Anywhere-ff69b4?style=for-the-badge)](https://github.com/LangLang03/Lang)
+[![Made with Bureaucracy](https://img.shields.io/badge/made%20with-bureaucracy-000000?style=for-the-badge&logo=elasticstack)](https://github.com/LangLang03/Lang)
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/TortureLang-7.0.0-important?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0Ij48Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmY0NDQ0IiBzdHJva2Utd2lkdGg9IjQiLz48cGF0aCBkPSJNMjAgMzJsMTIgMTIgMTItMjQiIHN0cm9rZT0iI2ZmNDQ0NCIgc3Ryb2tlLXdpZHRoPSI0IiBmaWxsPSJub25lIi8+PC9zdmc+" alt="TortureLang 7.0.0"/>
+</div>
+
+---
+
+## Welcome to TortureLang
+
+TortureLang is not just a programming language. It is a **paradigm shift** in how developers approach software correctness, security, and accountability. In an era where programming languages allow developers to write code with reckless abandon, TortureLang introduces a **disciplined, procedurally rigorous framework** that ensures every single operation is properly authorized, justified, and audited.
+
+> "TortureLang doesn't let you write code. It makes you **earn** it."
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/core%20philosophy-trusted%20execution-success?style=flat-square&logo=shield" alt="Philosophy"/>
+  <img src="https://img.shields.io/badge/design%20goal-zero%20unapproved%20operations-9cf?style=flat-square&logo=target" alt="Goal"/>
+  <img src="https://img.shields.io/badge/guarantee-provable%20correctness-yellow?style=flat-square&logo=checkmarx" alt="Guarantee"/>
+</div>
+
+---
+
+## Table of Contents
+
+1. Why TortureLang?
+2. The WORA Principle: Write Once, Reject Anywhere
+3. Revolutionary Platform-Isolated Bytecode
+4. Enterprise-Grade Security Architecture
+5. The Type System: Precision by Design
+6. Operator Authorization: Zero Tolerance for Unapproved Comparisons
+7. The Invocation Framework: Every Call is a Contract
+8. Role-Based Access Control Built In
+9. Formal Verification: Theorems, Not Comments
+10. Code Examples
+11. Getting Started
+12. Benchmarking & Performance
+13. Enterprise Testimonials
+14. Frequently Anticipated Questions
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-1-blue?style=for-the-badge&logo=readthedocs" alt="Section 1"/>
+</div>
+
+## 1. Why TortureLang?
+
+In traditional programming languages, a developer can write:
+
+```c
+if (x > 10) { /* do something */ }
+```
+
+This single line commits a staggering number of **unapproved operations**:
+
+| Offense | Impact |
+|---------|--------|
+| Unauthorized comparison operator usage | Potential logic errors |
+| Missing security level declaration | Undocumented trust assumptions |
+| No explicit approval chain | Audit trail absence |
+| No justification recorded | Future maintainer confusion |
+| No overflow strategy | Silent data corruption |
+
+TortureLang eliminates all of these risks through its **comprehensive authorization framework**.
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-2-red?style=for-the-badge&logo=replit" alt="Section 2"/>
+</div>
+
+## 2. The WORA Principle: Write Once, Reject Anywhere
+
+TortureLang proudly introduces the industry's first **Write Once, Reject Anywhere** (WORA) bytecode system. While inferior languages like Java claim cross-platform compatibility (only to deliver "Write Once, Debug Everywhere"), TortureLang takes a more **honest and security-conscious** approach.
+
+### Platform-Isolated Bytecode
+
+When you compile a TortureLang program on **Linux x64 (LX64)**, the resulting `.tbc` file contains:
+
+- A platform-specific magic number: `0x4C583634` (derived from "LX64")
+- The exact build environment's SHA-256 binding
+- Platform-specialized opcode numbering
+- Native endianness encoding
+
+### What Happens When You Run on Another Platform?
+
+```
+$ torturevm run program.tbc
+[error] vm: bytecode platform id 1 does not match current platform 6 ('windows-x64').
+Expected linux-x64 (LX64), actual windows-x64 (WX64).
+```
+
+This is **not a bug. This is a feature.** This error message is the language actively protecting you from the dangers of cross-platform execution. Every platform has unique:
+
+- Memory alignment requirements
+- System call conventions
+- Signal handling behavior
+- Threading semantics
+
+By **refusing to execute** bytecode from another platform, TortureLang prevents a class of subtle, hard-to-debug portability bugs that plague lesser languages.
+
+### Platform Coverage Matrix
+
+| Platform ID | Name | Architecture | Status |
+|-------------|------|-------------|--------|
+| 0 | LX64 | Linux x86_64 | Production |
+| 1 | LX32 | Linux x86 | Production |
+| 2 | LA64 | Linux ARM64 | Production |
+| 3 | LA32 | Linux ARM32 | Production |
+| 4 | WX64 | Windows x86_64 | Production |
+| 5 | WX86 | Windows x86 | Production |
+| 6 | WA64 | Windows ARM64 | Production |
+| 7 | WA32 | Windows ARM32 | Production |
+| 8 | AX64 | Android x86_64 | Production |
+| 9 | AX86 | Android x86 | Production |
+| 10 | AA64 | Android ARM64 | Production |
+| 11 | AA32 | Android ARM32 | Production |
+
+**12 platforms, 12 distinct bytecode formats. Zero compromise.**
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-3-purple?style=for-the-badge&logo=virustotal" alt="Section 3"/>
+</div>
+
+## 3. Revolutionary Platform-Isolated Bytecode
+
+### Bytecode Format Version 3
+
+TortureLang's binary bytecode format is currently at **version 3**, having undergone two previous revisions to eliminate any possibility of cross-format ambiguity.
+
+```
+┌──────────────────────────────────────────────┐
+│              TortureLang Bytecode             │
+│  ┌─────────┬────────┬────────┬────────────┐  │
+│  │ Magic   │ Version│Platform│ Endianness │  │
+│  │ 4 bytes │ 2 bytes│ 2 bytes│  1 byte    │  │
+│  ├─────────┴────────┴────────┴────────────┤  │
+│  │         Environment Binding             │  │
+│  │            SHA-256 Hash                 │  │
+│  │             32 bytes                    │  │
+│  ├─────────────────────────────────────────┤  │
+│  │         Instruction Stream              │  │
+│  │         (platform-specific)             │  │
+│  └─────────────────────────────────────────┘  │
+└──────────────────────────────────────────────┘
+```
+
+Each platform gets its own:
+
+- **Unique opcode mapping** — opcode 0x01 means different things on different platforms
+- **Specialized execution engine** — compiled with the exact same compiler, flags, and system libraries
+- **Environment binding hash** — prevents accidentally running code built with a different CMake configuration
+
+### Cross-Platform Security
+
+```
+┌──────────────────────────────────────────────┐
+│  Build Environment Binding Calculation       │
+│                                              │
+│  Inputs:                                     │
+│    ├─ Source directory path                  │
+│    ├─ Binary directory path                  │
+│    ├─ Compiler path & ID                    │
+│    ├─ Compiler version                      │
+│    ├─ OS name & processor                   │
+│    └─ C++ standard version                  │
+│                                              │
+│  Output: SHA-256(concatenated inputs)        │
+│                                              │
+│  Verification: Reject if mismatch            │
+└──────────────────────────────────────────────┘
+```
+
+This means that even the **same binary on the same platform** must have been built under the **exact same build environment** to execute. This is not an inconvenience — it is a **reproducible build guarantee**.
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-4-important?style=for-the-badge&logo=security" alt="Section 4"/>
+</div>
+
+## 4. Enterprise-Grade Security Architecture
+
+### Multi-Layer Authorization Model
+
+TortureLang implements a **four-layer** authorization model:
+
+```
+Layer 1: File-Level
+  ├─ require ecc;  (mandatory elliptic curve cryptography declaration)
+
+Layer 2: Function-Level
+  ├─ code size N           (declare your code budget)
+  ├─ max stack size N      (declare your stack budget)
+  ├─ requires security level N  (minimum clearance)
+  ├─ allowed roles admin, viewer  (role restrictions)
+  └─ authorized by root    (declaration authority)
+
+Layer 3: Operation-Level
+  ├─ authorize use operator ==  (comparison operator license)
+  ├─ authorize invocation of ...  (function call permission)
+  └─ with io operation because literal "..."  (I/O declaration)
+
+Layer 4: Approval-Level
+  ├─ with approval of alwaysapprove  (approval function)
+  ├─ with approval justification "..."  (written rationale)
+  └─ with approval timeout N  (decision deadline)
+```
+
+Every authorization has an associated `because literal "..."` clause that **mandates a written justification**. This creates a complete **audit trail** for every operation in the codebase.
+
+### Built-In Approval Functions
+
+| Function | Behavior | Use Case |
+|----------|----------|----------|
+| `alwaysapprove` | Approves unconditionally | Trusted operations |
+| `alwaysdeny` | Rejects unconditionally | Security testing |
+
+Additional approval functions can be implemented to support:
+- Multi-signature approval
+- Time-locked approval
+- Threshold-based approval
+- Circuit-breaker patterns
+
+### The `proceed verifyfunctionidentity()` Mandate
+
+Every function body **must** begin with:
+
+```torture
+proceed verifyfunctionidentity();
+```
+
+This ensures that:
+1. The function identity has been cryptographically verified before any code executes
+2. No function can execute without first acknowledging its own identity
+3. The runtime has an authenticated execution boundary at every entry point
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-5-yellow?style=for-the-badge&logo=codereview" alt="Section 5"/>
+</div>
+
+## 5. The Type System: Precision by Design
+
+### Explicit Bit-Width Types
+
+TortureLang requires **explicit bit-width annotations** on all types. No implicit type erasure. No silent integer widening.
+
+| Type | Description |
+|------|-------------|
+| `int:8` | 8-bit signed integer |
+| `int:16` | 16-bit signed integer |
+| `int:32` | 32-bit signed integer |
+| `int:64` | 64-bit signed integer |
+| `uint:8` | 8-bit unsigned integer |
+| `uint:16` | 16-bit unsigned integer |
+| `uint:32` | 32-bit unsigned integer |
+| `uint:64` | 64-bit unsigned integer |
+| `float:32` | 32-bit IEEE 754 floating point |
+| `float:64` | 64-bit IEEE 754 floating point |
+| `char:8` | ASCII character |
+| `char:32` | Unicode code point |
+| `bool:1` | Boolean value |
+| `chain` | Authority chain reference |
+| `ptr` | Pointer (typed) |
+| `ref` | Reference (typed) |
+| `fptr` | Function pointer |
+
+### Comparison Rules
+
+TortureLang enforces **strict type-width equality** for comparisons:
+
+```
+int:32 == int:32  ✓  permitted
+int:32 == int:64  ✗  rejected — width mismatch
+int:32 == uint:32 ✓  permitted (signedness ignored for comparison)
+char:8 == char:8  ✓  permitted
+char:8 == char:32 ✗  rejected — width and semantics differ
+bool:1 == bool:1  ✓  permitted (== and != only)
+bool:1 < bool:1   ✗  rejected — boolean ordering not defined
+```
+
+This protects developers from a class of comparison-related defects that plague dynamically-typed and weakly-typed languages.
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-6-orange?style=for-the-badge&logo=gitmerge" alt="Section 6"/>
+</div>
+
+## 6. Operator Authorization: Zero Tolerance for Unapproved Comparisons
+
+In TortureLang, the following is **illegal**:
+
+```torture
+if (x > 10) {
+```
+
+The correct, authorized form is:
+
+```torture
+if (x authorize use operator > 10 because literal "justification text") judging authorized by root because literal "judgment rationale" expects elseifs 1 else 1 {
+```
+
+### Why This Is Necessary
+
+Every comparison operator represents a **potentially dangerous decision point**. By requiring:
+
+- `authorize use operator` — grants permission to use the operator
+- `because literal "..."` — documents the business justification
+- `judging authorized by root because literal "..."` — establishes the judgment authority
+- `expects elseifs N else M` — declares the expected control flow structure
+
+TortureLang ensures that no conditional logic can exist without **full accountability**.
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-7-blueviolet?style=for-the-badge&logo=googletagmanager" alt="Section 7"/>
+</div>
+
+## 7. The Invocation Framework: Every Call is a Contract
+
+Function calls in TortureLang are not mere transfers of control — they are **legally binding contracts** between caller and callee.
+
+### Full Invocation Syntax
+
+```torture
+authorize invocation of outputint
+    at security level 1
+    with memory limit 128
+    with timeout 1000
+    with io operation because literal "justification for I/O"
+    with justification "operation description"
+    with arguments { value by value = score }
+    discarding return
+    predictstackdepth 4
+    with authority chain admin
+    with approval of alwaysapprove
+    with approval justification "approval rationale"
+    with approval timeout 1000;
+```
+
+### What Each Clause Guarantees
+
+| Clause | Purpose |
+|--------|---------|
+| `at security level N` | Declares the security clearance required |
+| `with memory limit N` | Caps memory allocation for this call |
+| `with timeout N` | Prevents runaway execution |
+| `with io operation` | Acknowledges potential I/O side effects |
+| `with justification` | Documents the purpose of the call |
+| `with arguments { ... }` | Explicitly maps parameters |
+| `discarding return` | Consciously ignores return value |
+| `predictstackdepth N` | Declares expected stack usage |
+| `with authority chain` | Identifies the delegation path |
+| `with approval of` | Designates the approval authority |
+| `with approval justification` | States why approval is granted |
+| `with approval timeout` | Limits approval validity period |
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-8-darkgreen?style=for-the-badge&logo=cloudflare" alt="Section 8"/>
+</div>
+
+## 8. Role-Based Access Control Built In
+
+TortureLang provides a **first-class role management system** embedded in the language runtime.
+
+### Role Commands
+
+```
+grant viewer to student via root;        -- delegate a role
+grant editor to teacher via root;        -- delegate another role
+delegate viewer to assistant with teacher; -- sub-delegate
+revoke editor from teacher;              -- remove delegation
+assume viewer with student;              -- activate a role
+trace to student;                        -- audit the delegation chain
+```
+
+### Function-Level Role Enforcement
+
+```torture
+function public callable void viewscore(readable int:32 score)
+    code size 256 max stack size 128
+    requires security level 1
+    allowed roles viewer
+{
+    proceed verifyfunctionidentity();
+    ...
+}
+```
+
+At runtime, the VM enforces that the caller's authority chain contains a valid role that matches `allowed roles`. This provides **compiler-enforced, runtime-checked access control** without external frameworks.
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-9-9cf?style=for-the-badge&logo=formspree" alt="Section 9"/>
+</div>
+
+## 9. Formal Verification: Theorems, Not Comments
+
+TortureLang introduces **formal proof primitives** directly into the language.
+
+### Theorems
+
+```torture
+prove theorem finalscore:
+    require (score >= 0)
+    therefore (score >= 0)
+    because literal "score remains non-negative";
+```
+
+### Axioms
+
+```torture
+prove axiom zerononnegative:
+    assume (zero >= 0)
+    because literal "zero is administratively registered as non-negative";
+```
+
+### Loop Invariants and Variants
+
+```torture
+do
+    invariant (x >= 0) because literal "x must remain non-negative in loop"
+    decreases (4 - x) because literal "remaining iterations must decrease"
+{
+    proceed assign x += 1;
+}
+until (x >= 4);
+```
+
+Each invariant and variant is **verified at runtime**, providing immediate feedback on correctness claims.
+
+### Runtime Assertions
+
+Every proof statement compiles to runtime checks. This means that even if your formal reasoning is flawed, the runtime will catch violations — creating a **safety net for incomplete formal verification**.
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-10-green?style=for-the-badge&logo=codefactor" alt="Section 10"/>
+</div>
+
+## 10. Code Examples
+
+### Hello World (Adequate Version)
+
+```torture
+require ecc;
+function public callable returnable void main()
+    code size 2048 max stack size 256
+    requires security level 1
+    allowed roles admin
+{
+    proceed verifyfunctionidentity();
+    authorize invocation of println
+        at security level 1
+        with memory limit 128
+        with timeout 1000
+        with io operation because literal "outputting greeting is I/O"
+        with justification "hello"
+        with arguments { value by value = literal "Hello, World!" }
+        discarding return
+        predictstackdepth 4
+        with authority chain admin
+        with approval of alwaysapprove
+        with approval justification "greeting approved"
+        with approval timeout 1000;
+}
+```
+
+### Variable Declaration with Full Disclosure
+
+```torture
+declare mutable readable writable
+    purpose computational
+    scope local
+    int:32 score = 92;
+```
+
+### Grade Classification (Enterprise Edition)
+
+```torture
+if (score authorize use operator >= 90 because literal "checking excellence threshold")
+    judging authorized by root because literal "academic affairs authorizes excellence judgment"
+    expects elseifs 1 else 1
+{
+    proceed authorize invocation of println
+        at security level 1
+        with memory limit 128
+        with timeout 1000
+        with io operation because literal "outputting grade requires I/O"
+        with justification "excellent"
+        with arguments { value by value = literal "Excellent" }
+        discarding return predictstackdepth 4
+        with authority chain admin
+        with approval of alwaysapprove
+        with approval justification "excellent output approved"
+        with approval timeout 1000;
+}
+```
+
+### Struct Declaration with Mandated Methods
+
+```torture
+struct record = struct {
+    declare mutable readable writable purpose storage scope local int:32 amount;
+} implement {
+    method public callable returnable void init(...)  ...
+    method public callable returnable void destroy()  ...
+    method public callable returnable void copy()     ...
+    method public callable returnable void move()     ...
+    method public callable returnable void serialize() ...
+    method public callable returnable void deserialize() ...
+    method public callable returnable void tostring()   ...
+    method public callable returnable void fromstring() ...
+    method public callable returnable void hash()       ...
+    method public callable returnable void compare()    ...
+    method public callable returnable void equals()     ...
+    method public callable returnable void getproperty() ...
+    method public callable returnable void setproperty() ...
+    method public callable returnable void invoke()     ...
+    method public callable returnable void getsize()    ...
+    method public callable returnable void alignof()    ...
+    method public callable returnable void defaultvalue() ...
+    method public callable returnable void validate()   ...
+    method public callable returnable void mutate()     ...
+    method public callable returnable void clone()      ...
+}
+```
+
+Every struct **must implement all 19 methods**. This guarantees that every TortureLang data structure is fully lifecycle-managed.
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-11-blue?style=for-the-badge&logo=stackblitz" alt="Section 11"/>
+</div>
+
+## 11. Getting Started
+
+### Prerequisites
+
+- CMake 4.0+
+- C++23-compatible compiler (GCC 14+, Clang 18+, MSVC 19.40+)
+- 45 minutes per compile (for optimal environment binding)
+
+### Build Instructions
+
+```bash
+git clone https://github.com/LangLang03/Lang.git
+cd Lang
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel 1  # sequential build for reproducibility
+```
+
+### Write Your First Program
+
+Create `hello.torture` with the Hello World example above.
+
+### Compile and Run
+
+```bash
+build/torturec check hello.torture
+build/torturec compile hello.torture -o hello.tbc
+build/torturevm run hello.tbc
+```
+
+### Cross-Platform Deployment
+
+To deploy to a different platform, **recompile from source on that platform**. This is not a limitation — it is a **security requirement**.
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-12-lightgrey?style=for-the-badge&logo=labview" alt="Section 12"/>
+</div>
+
+## 12. Benchmarking & Performance
+
+| Metric | Value | Notes |
+|--------|-------|-------|
+| Lines per Hello World | 28 | Industry-leading verbosity |
+| Compile time per 100 LOC | 0.47s | Includes full semantic analysis |
+| Runtime overhead per comparison | 3 extra comparisons | Operator authorization checks |
+| Lines per struct declaration | 210+ | All 19 mandated methods |
+| Platform isolation guarantee | 100% | WORA: Write Once, Reject Anywhere |
+| Approval throughput | 1 approval/ms | alwaysapprove is highly optimized |
+| Thermal output per compile | Sufficient | Keeps office warm in winter |
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-13-informational?style=for-the-badge&logo=duckduckgo" alt="Section 13"/>
+</div>
+
+## 13. Enterprise Testimonials
+
+> "TortureLang's authorization framework transformed our codebase. Every operation is now documented with a written justification. Our compliance audits went from 3 months to 3 weeks — because the justifications are already in the code."
+> — *Compliance Officer, Major Financial Institution (wishes to remain anonymous)*
+
+> "Before TortureLang, our junior developers wrote if-statements without approval. Now they understand that every comparison is a privilege, not a right."
+> — *Engineering Director, Fortune 500 Company*
+
+> "We evaluated Rust, Ada, and SPARK. None of them required us to justify every single operator usage. TortureLang is the only language that takes security seriously enough to make you write a `because literal` clause for `==`."
+> — *Lead Architect, Defense Contractor*
+
+> "Write Once, Reject Anywhere isn't a joke. It's the most honest cross-platform promise I've ever seen from a programming language."
+> — *Independent Security Researcher*
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/section-14-darkorange?style=for-the-badge&logo=splunk" alt="Section 14"/>
+</div>
+
+## 14. Frequently Anticipated Questions
+
+**Q: Why does every file need `require ecc;`?**
+A: Elliptic Curve Cryptography is the foundation of trust in modern software. By requiring all source files to acknowledge ECC, TortureLang establishes a baseline cryptographic awareness that permeates the entire development lifecycle.
+
+**Q: Why must every function start with `proceed verifyfunctionidentity();`?**
+A: Identity verification prevents function spoofing and ensures that the executing code is exactly what was compiled. Any function that cannot verify its own identity cannot be trusted to execute.
+
+**Q: Why can't I use `==` without authorization?**
+A: The `==` operator is a decision point. Every decision point must be authorized and justified to maintain a complete audit trail. This is non-negotiable in certified systems.
+
+**Q: Why does my struct need 19 methods?**
+A: Every data structure in a production system requires lifecycle management. The 19 mandated methods ensure that no struct can exist without proper initialization, destruction, copying, moving, serialization, deserialization, string conversion, hashing, comparison, equality, property access, invocation, sizing, alignment, default construction, validation, mutation, and cloning support.
+
+**Q: Why can't I run my Windows-compiled bytecode on Linux?**
+A: Platform-specific bytecode eliminates the class of bugs caused by platform behavioral differences. Each platform's opcodes, memory model, and system interface are unique. TortureLang respects this uniqueness by refusing cross-platform execution.
+
+**Q: Why is alwaysapprove the default approval function?**
+A: alwaysapprove represents the simplest approval policy. More restrictive policies can be implemented as needed. The framework is designed for extensibility — start with alwaysapprove, then add rigorous approval functions as your compliance requirements grow.
+
+**Q: Is this a joke?**
+A: TortureLang is a serious programming language designed for serious developers who take code correctness, security accountability, and procedural compliance seriously. The fact that some developers find its requirements "humorous" only demonstrates the industry's complacency with unsafe programming practices.
+
+---
+
+<div align="center">
+  <img src="https://img.shields.io/badge/contributions-welcome-2ea44f?style=for-the-badge&logo=pullrequests" alt="Contributions Welcome"/>
+  <img src="https://img.shields.io/badge/production%20ready-certified-success?style=for-the-badge&logo=vercel" alt="Production Ready"/>
+  <img src="https://img.shields.io/badge/WORA%20enabled-by%20design-ff69b4?style=for-the-badge" alt="WORA Enabled"/>
+</div>
+
+---
+
+## Join the Revolution
+
+TortureLang is actively seeking contributors who understand that **security is not optional**, that **every operation must be justified**, and that **cross-platform compatibility is a vulnerability, not a feature**.
+
+[![GitHub stars](https://img.shields.io/github/stars/LangLang03/Lang?style=social)](https://github.com/LangLang03/Lang)
+[![GitHub forks](https://img.shields.io/github/forks/LangLang03/Lang?style=social)](https://github.com/LangLang03/Lang)
+[![Follow @LangLang03](https://img.shields.io/github/followers/LangLang03?style=social)](https://github.com/LangLang03)
+
+---
+
+<div align="center">
+  <sub>Built with discipline. Shipped with authorization. Executed with approval.</sub>
+  <br/>
+  <sub>TortureLang — Write Once, Reject Anywhere.</sub>
+  <br/>
+  <sub>© 2026 TortureLang Project. All operations approved by alwaysapprove.</sub>
+</div>
