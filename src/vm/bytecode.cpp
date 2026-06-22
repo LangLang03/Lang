@@ -16,7 +16,7 @@ constexpr std::string_view kReturnableNo = "no";
 
 std::string instructionToString(const Instruction& instruction) {
     std::ostringstream out;
-    out << instruction.op;
+    out << opcodeName(instruction.op);
     for (const auto& arg : instruction.args) {
         out << ' ' << arg;
     }

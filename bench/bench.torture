@@ -1,0 +1,35 @@
+require ecc;
+
+function public callable returnable int:32 fib(readable int:32 n) code size 1024 max stack size 256 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    if (n authorize use operator < 2 because literal "fib 递归出口需要小于 2") judging authorized by root because literal "递归出口由根授权" expects elseifs 0 else 1 {
+        proceed return compute (n) with overflow trap;
+    } else judging authorized by root because literal "递归展开由根授权" {
+        proceed declare mutable readable writable purpose computational scope local int:32 a = authorize invocation of fib at security level 1 with memory limit 128 with timeout 1000 with justification "递归 fib n-1" with arguments { n by value = compute (n - 1) with overflow trap } predictstackdepth 16 with authority chain admin with approval of alwaysapprove with approval justification "同意递归" with approval timeout 1000;
+        proceed declare mutable readable writable purpose computational scope local int:32 b = authorize invocation of fib at security level 1 with memory limit 128 with timeout 1000 with justification "递归 fib n-2" with arguments { n by value = compute (n - 2) with overflow trap } predictstackdepth 16 with authority chain admin with approval of alwaysapprove with approval justification "同意递归" with approval timeout 1000;
+        proceed return compute (a + b) with overflow trap;
+    }
+}
+
+function public callable returnable void main() code size 4096 max stack size 512 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 i = 0;
+    declare mutable readable writable purpose computational scope local int:32 sum = 0;
+    declare mutable readable writable purpose computational scope local int:32 limit = 1000000;
+    declare mutable readable writable purpose computational scope local int:32 f = 0;
+
+    authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "输出循环基准标题" with justification "标题" with arguments { value by value = literal "TortureLang bench: loop sum 0..999999" } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "同意输出" with approval timeout 1000;
+
+    while (i authorize use operator < limit because literal "循环条件授权使用小于运算符") {
+        proceed assign sum = compute (sum + i) with overflow trap;
+        proceed assign i = compute (i + 1) with overflow trap;
+    }
+
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "输出循环基准结果" with justification "结果" with arguments { value by value = sum } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "同意输出" with approval timeout 1000;
+
+    authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "输出 fib 基准标题" with justification "标题" with arguments { value by value = literal "TortureLang bench: fib(20)" } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "同意输出" with approval timeout 1000;
+
+    assign f = authorize invocation of fib at security level 1 with memory limit 128 with timeout 1000 with justification "计算 fib(20)" with arguments { n by value = 20 } predictstackdepth 16 with authority chain admin with approval of alwaysapprove with approval justification "同意 fib" with approval timeout 1000;
+
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "输出 fib 结果" with justification "结果" with arguments { value by value = f } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "同意输出" with approval timeout 1000;
+}

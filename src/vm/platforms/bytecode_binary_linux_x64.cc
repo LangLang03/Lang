@@ -261,11 +261,8 @@ class BytecodeReader {
 };
 
 void WriteInstruction(BytecodeWriter& writer, const Instruction& instruction) {
-  const auto opcode = opcodeFromName(instruction.op);
-  if (!opcode) {
-    throw std::runtime_error("unknown opcode '" + instruction.op + "' cannot be serialized");
-  }
-  writer.WriteLittleEndian(static_cast<std::uint16_t>(*opcode));
+  // instruction.op 现在是 Opcode enum，直接写 2 字节
+  writer.WriteLittleEndian(static_cast<std::uint16_t>(instruction.op));
   writer.WriteStringVector(instruction.args);
 }
 
@@ -292,15 +289,15 @@ std::optional<Instruction> ReadInstruction(BytecodeReader& reader) {
   if (!raw_opcode) {
     return std::nullopt;
   }
-  const auto name = platform_bytecode::opcodeNameForOpcodeId(*raw_opcode);
-  if (name.empty()) {
+  if (platform_bytecode::opcodeNameForOpcodeId(*raw_opcode).empty()) {
     reader.Fail(bytecode_diagnostic::kUnknownOpcode,
                 "bytecode contains unknown opcode id " + std::to_string(*raw_opcode) +
                     " for platform '" + std::string{kPlatformName} + "'");
     return std::nullopt;
   }
   Instruction instruction;
-  instruction.op = std::string{name};
+  // 直接用 raw id 转 Opcode，省去 string 来回转换
+  instruction.op = static_cast<Opcode>(*raw_opcode);
   if (!reader.ReadStringVector(instruction.args, field_name::kInstructionArgs)) {
     return std::nullopt;
   }

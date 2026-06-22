@@ -82,7 +82,7 @@ enum class Opcode : std::uint16_t {
 };
 
 struct Instruction {
-  std::string op;
+  Opcode op = Opcode::kHalt;
   std::vector<std::string> args;
 };
 
@@ -92,7 +92,7 @@ std::string_view opcodeName(Opcode opcode);
 // 接受带后缀的新名（"ADD_LX64"）或旧别名（"ADD"，视作当前平台）。
 std::optional<Opcode> opcodeFromName(std::string_view name);
 
-// 用枚举构造一个 Instruction：op 字段使用带平台后缀的全名。
+// 用枚举构造一个 Instruction。
 Instruction makeInstruction(Opcode opcode, std::vector<std::string> args = {});
 
 }  // namespace torture::vm

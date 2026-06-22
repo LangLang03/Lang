@@ -9,7 +9,7 @@ namespace torture::vm {
 
 namespace vm_limits {
 
-inline constexpr std::size_t DefaultMaxSteps = 100000;
+inline constexpr std::size_t DefaultMaxSteps = 100000000000;
 
 } // namespace vm_limits
 

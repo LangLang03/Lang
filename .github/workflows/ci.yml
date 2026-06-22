@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    name: Build & Test (${{ matrix.os }} / ${{ matrix.build_type }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build_type: [Release]
+        cxx_standard: [17]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Set up build tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            python3 python3-pip
+
+      - name: Set up build tools (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install cmake ninja
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_CXX_STANDARD=${{ matrix.cxx_standard }} \
+            -DCMAKE_CXX_STANDARD_REQUIRED=ON
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }} -j
+
+      - name: Run unit tests
+        run: |
+          cd build
+          ctest --output-on-failure --build-config ${{ matrix.build_type }}
+          ./torture_tests --reporter compact
+
+      - name: Run benchmark (informational)
+        shell: bash
+        run: |
+          cd build
+          ./torturec compile ../bench/bench.torture -o /tmp/bench.tbc || true
+          if [ -f /tmp/bench.tbc ]; then
+            echo "=== torturevm ==="
+            time ./torturevm run /tmp/bench.tbc
+            echo "=== python3 ==="
+            cd ..
+            time python3 bench/bench.py
+          fi
+
+      - name: Lint (clang-tidy, best-effort)
+        continue-on-error: true
+        run: |
+          if command -v clang-tidy >/dev/null 2>&1; then
+            find src -name '*.cpp' -o -name '*.cc' | head -20 | xargs -r clang-tidy --quiet
+          else
+            echo "clang-tidy not installed, skipping"
+          fi
+
+  cross-platform-bytecode:
+    name: Cross-platform bytecode smoke
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build torturec/torturevm for all 12 platforms
+        run: |
+          set -e
+          declare -A PLATFORMS=(
+            [linux_x64]=linux_x64
+            [linux_x32]=linux_x32
+            [linux_arm32]=linux_arm32
+            [linux_arm64]=linux_arm64
+            [android_x64]=android_x64
+            [android_x86]=android_x86
+            [android_arm32]=android_arm32
+            [android_arm64]=android_arm64
+            [windows_x64]=windows_x64
+            [windows_x86]=windows_x86
+            [windows_arm32]=windows_arm32
+            [windows_arm64]=windows_arm64
+          )
+          for p in "${!PLATFORMS[@]}"; do
+            echo "=== build $p ==="
+            cmake -S . -B "build-$p" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DTORTURE_PLATFORM=$p > /dev/null
+            cmake --build "build-$p" -j > /dev/null
+          done
+      - name: Compile & run hello-world on all 12 platforms
+        run: |
+          set -e
+          cat > /tmp/hello.torture <<'EOF'
+          require ecc;
+          function public callable void main() code size 64 max stack size 32 requires security level 1 allowed roles admin {
+              proceed verifyfunctionidentity();
+              authorize invocation of outputint at security level 1 with memory limit 64 with timeout 1000 with io operation because literal "io" with justification "print" with arguments { value by value = 42 } discarding return predictstackdepth 4 with authority chain root with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+          }
+          EOF
+          for p in linux_x64 linux_x32 linux_arm32 linux_arm64 \
+                   android_x64 android_x86 android_arm32 android_arm64 \
+                   windows_x64 windows_x86 windows_arm32 windows_arm64; do
+            echo "=== run $p ==="
+            ./build-$p/torturec compile /tmp/hello.torture -o /tmp/hello_$p.tbc
+            ./build-$p/torturevm run /tmp/hello_$p.tbc
+          done

@@ -112,11 +112,7 @@ std::optional<Opcode> opcodeFromName(std::string_view name) {
 }
 
 Instruction makeInstruction(Opcode opcode, std::vector<std::string> args) {
-  const auto name = opcodeName(opcode);
-  if (name.empty()) {
-    throw std::runtime_error("cannot construct instruction for unknown opcode");
-  }
-  return Instruction{std::string{name}, std::move(args)};
+  return Instruction{opcode, std::move(args)};
 }
 
 }  // namespace torture::vm
