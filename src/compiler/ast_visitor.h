@@ -28,6 +28,11 @@ public:
     virtual void visit(const JudgmentClause&) {}
     virtual void visit(const RoleStmt&) {}
     virtual void visit(const InstantiateStmt&) {}
+    virtual void visit(const DescriptionClause&) {}
+    virtual void visit(const MetaNote&) {}
+    virtual void visit(const StdImport&) {}
+    virtual void visit(const ExternalDecl&) {}
+    virtual void visit(const ApplyStatement&) {}
 };
 
 } // namespace torture::compiler

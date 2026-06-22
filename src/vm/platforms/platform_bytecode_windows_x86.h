@@ -90,6 +90,7 @@ inline constexpr std::uint8_t kLocalOpcodeRole = 0x4E;
 inline constexpr std::uint8_t kLocalOpcodeOperatorInput = 0x4F;
 inline constexpr std::uint8_t kLocalOpcodeReturn = 0x50;
 inline constexpr std::uint8_t kLocalOpcodeHalt = 0x51;
+inline constexpr std::uint8_t kLocalOpcodeApply = 0x52;
 
 // 平台特化 opcode 值 = (TORTURE_PLATFORM_ID << 8) | kLocalOpcode*
 inline constexpr std::uint16_t kOpcodeVerify =
@@ -224,6 +225,7 @@ inline constexpr std::uint16_t kOpcodeReturn =
     (static_cast<std::uint16_t>(TORTURE_PLATFORM_ID) << 8) | kLocalOpcodeReturn;
 inline constexpr std::uint16_t kOpcodeHalt =
     (static_cast<std::uint16_t>(TORTURE_PLATFORM_ID) << 8) | kLocalOpcodeHalt;
+inline constexpr std::uint16_t kOpcodeApply = static_cast<std::uint16_t>((static_cast<std::uint16_t>(TORTURE_PLATFORM_ID) << 8) | kLocalOpcodeApply);
 
 static_assert(kLocalOpcodeVerify == 0x10, "windows_x86 local opcode range must start at 0x10");
 static_assert(kLocalOpcodeHalt == 0x51, "windows_x86 local opcode range must end at 0x51");

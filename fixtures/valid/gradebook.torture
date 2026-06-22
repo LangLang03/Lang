@@ -1,7 +1,7 @@
 require ecc;
-function public callable void printsummary(readable int:32 chinese, readable int:32 math, readable int:32 english) code size 1024 max stack size 256 requires security level 1 allowed roles viewer {
+function public callable void printsummary(readable int of width bit32 chinese, readable int of width bit32 math, readable int of width bit32 english) code size 1024 max stack size 256 requires security level 1 allowed roles viewer {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 total = compute ((chinese + math) + english) with overflow trap;
+    declare mutable readable writable purpose computational scope local int of width bit32 total = compute ((chinese + math) + english) with overflow trap;
     authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "查看成绩需要输出系统标题" with justification "标题" with arguments { value by value = literal "成绩管理系统" } discarding return predictstackdepth 4 with authority chain viewer with approval of alwaysapprove with approval justification "同意输出标题" with approval timeout 1000;
     authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "查看成绩需要输出学生姓名" with justification "学生" with arguments { value by value = literal "学生：张三" } discarding return predictstackdepth 4 with authority chain viewer with approval of alwaysapprove with approval justification "同意输出学生" with approval timeout 1000;
     authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "查看成绩需要输出语文分数标签" with justification "语文标签" with arguments { value by value = literal "语文" } discarding return predictstackdepth 4 with authority chain viewer with approval of alwaysapprove with approval justification "同意输出语文标签" with approval timeout 1000;
@@ -20,7 +20,7 @@ function public callable void printsummary(readable int:32 chinese, readable int
         proceed authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "查看成绩需要输出补考等级" with justification "补考等级" with arguments { value by value = literal "等级：需要补考" } discarding return predictstackdepth 4 with authority chain viewer with approval of alwaysapprove with approval justification "同意输出补考等级" with approval timeout 1000;
     }
 }
-function public callable void setscore(readable writable ptr<readable writable, int:32> target, readable int:32 value) code size 128 max stack size 64 requires security level 1 allowed roles editor {
+function public callable void setscore(readable writable ptr<readable writable, int of width bit32> target, readable int of width bit32 value) code size 128 max stack size 64 requires security level 1 allowed roles editor {
     proceed verifyfunctionidentity();
     assign *target = value;
 }
@@ -29,12 +29,12 @@ function public callable returnable void main() code size 8192 max stack size 51
     grant viewer to student via root;
     grant viewer to teacher via root;
     grant editor to teacher via root;
-    declare mutable readable writable purpose computational scope local int:32 chinese = 92;
-    declare mutable readable writable purpose computational scope local int:32 math = 88;
-    declare mutable readable writable purpose computational scope local int:32 english = 90;
-    declare mutable readable writable purpose computational scope local int:32 command = 1;
-    declare mutable readable writable purpose computational scope local int:32 newscore = 0;
-    declare mutable readable writable purpose computational scope local bool:1 running = true;
+    declare mutable readable writable purpose computational scope local int of width bit32 chinese = 92;
+    declare mutable readable writable purpose computational scope local int of width bit32 math = 88;
+    declare mutable readable writable purpose computational scope local int of width bit32 english = 90;
+    declare mutable readable writable purpose computational scope local int of width bit32 command = 1;
+    declare mutable readable writable purpose computational scope local int of width bit32 newscore = 0;
+    declare mutable readable writable purpose computational scope local bool of width bit1 running = true;
     while (running authorize use operator == true because literal "菜单循环授权使用相等运算符") {
         proceed authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "菜单循环需要输出功能列表" with justification "菜单标题" with arguments { value by value = literal "菜单：1学生查看 2改语文 3改数学 4改英语 5教师查看 0退出" } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "同意输出菜单" with approval timeout 1000;
         authorize invocation of println at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "菜单循环需要提示输入命令" with justification "命令提示" with arguments { value by value = literal "请输入命令编号" } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "同意输出命令提示" with approval timeout 1000;

@@ -1,0 +1,6 @@
+require ecc;
+require std;
+stddecl literal "demo" because literal "demo reason";
+function public callable returnable void main() code size 64 max stack size 32 requires security level 1 allowed roles admin declaredescription literal "m" because literal "r"; returndescription literal "v" because literal "r"; {
+    proceed verifyfunctionidentity();
+}

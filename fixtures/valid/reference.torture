@@ -1,11 +1,11 @@
 require ecc;
-function public callable void bump(readable writable ptr<readable writable, int:32> target) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+function public callable void bump(readable writable ptr<readable writable, int of width bit32> target) code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     assign *target = compute ( *target + 1) with overflow trap;
 }
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x = 4;
+    declare mutable readable writable purpose computational scope local int of width bit32 x = 4;
     authorize invocation of bump at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "bump" with arguments { target by reference = &x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }

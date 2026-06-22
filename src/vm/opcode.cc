@@ -14,7 +14,7 @@ struct OpcodeDescriptor {
   std::string_view name;  // 带当前平台后缀的全名
 };
 
-constexpr std::array<OpcodeDescriptor, 66> kOpcodeDescriptors = {{
+constexpr std::array<OpcodeDescriptor, 67> kOpcodeDescriptors = {{
     {Opcode::kVerify,             "VERIFY_" TORTURE_PLATFORM_SUFFIX_LITERAL},
     {Opcode::kPushInteger,        "PUSHI_" TORTURE_PLATFORM_SUFFIX_LITERAL},
     {Opcode::kPushString,         "PUSHS_" TORTURE_PLATFORM_SUFFIX_LITERAL},
@@ -81,6 +81,7 @@ constexpr std::array<OpcodeDescriptor, 66> kOpcodeDescriptors = {{
     {Opcode::kOperatorInput,      "OPINPUT_" TORTURE_PLATFORM_SUFFIX_LITERAL},
     {Opcode::kReturn,             "RET_" TORTURE_PLATFORM_SUFFIX_LITERAL},
     {Opcode::kHalt,               "HALT_" TORTURE_PLATFORM_SUFFIX_LITERAL},
+    {Opcode::kApply,              "APPLY_" TORTURE_PLATFORM_SUFFIX_LITERAL},
 }};
 
 }  // namespace

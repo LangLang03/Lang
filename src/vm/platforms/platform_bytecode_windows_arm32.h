@@ -105,6 +105,7 @@ inline constexpr std::uint8_t kLocalOpcodeRole                = 0xD2;
 inline constexpr std::uint8_t kLocalOpcodeOperatorInput      = 0xD3;
 inline constexpr std::uint8_t kLocalOpcodeReturn             = 0xD4;
 inline constexpr std::uint8_t kLocalOpcodeHalt               = 0xD5;
+inline constexpr std::uint8_t kLocalOpcodeApply = 0xD6;
 
 // 66 个平台特化 opcode 值 = (TORTURE_PLATFORM_ID << 8) | kLocalOpcode*
 inline constexpr std::uint16_t kOpcodeVerify = (static_cast<std::uint16_t>(TORTURE_PLATFORM_ID) << 8) | kLocalOpcodeVerify;
@@ -173,5 +174,6 @@ inline constexpr std::uint16_t kOpcodeRole = (static_cast<std::uint16_t>(TORTURE
 inline constexpr std::uint16_t kOpcodeOperatorInput = (static_cast<std::uint16_t>(TORTURE_PLATFORM_ID) << 8) | kLocalOpcodeOperatorInput;
 inline constexpr std::uint16_t kOpcodeReturn = (static_cast<std::uint16_t>(TORTURE_PLATFORM_ID) << 8) | kLocalOpcodeReturn;
 inline constexpr std::uint16_t kOpcodeHalt = (static_cast<std::uint16_t>(TORTURE_PLATFORM_ID) << 8) | kLocalOpcodeHalt;
+inline constexpr std::uint16_t kOpcodeApply = static_cast<std::uint16_t>((static_cast<std::uint16_t>(TORTURE_PLATFORM_ID) << 8) | kLocalOpcodeApply);
 
 }  // namespace torture::vm::platform_bytecode

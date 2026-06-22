@@ -7,13 +7,13 @@
 namespace torture::vm::platform_bytecode {
 namespace {
 
-// linux_x64 平台 66 opcode 查表。直接使用平台头文件中的 kOpcode* 常量。
+// linux_x64 平台 67 opcode 查表。直接使用平台头文件中的 kOpcode* 常量。
 struct OpcodeEntry {
     std::uint16_t id;
     std::string_view name;
 };
 
-constexpr std::array<OpcodeEntry, 66> kPlatformTable = {{
+constexpr std::array<OpcodeEntry, 67> kPlatformTable = {{
     {kOpcodeVerify,           "VERIFY_LX64"},
     {kOpcodePushInteger,      "PUSHI_LX64"},
     {kOpcodePushString,       "PUSHS_LX64"},
@@ -80,6 +80,7 @@ constexpr std::array<OpcodeEntry, 66> kPlatformTable = {{
     {kOpcodeOperatorInput,    "OPINPUT_LX64"},
     {kOpcodeReturn,           "RET_LX64"},
     {kOpcodeHalt,             "HALT_LX64"},
+    {kOpcodeApply,            "APPLY_LX64"},
 }};
 
 }  // namespace

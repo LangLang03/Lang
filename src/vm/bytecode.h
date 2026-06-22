@@ -34,6 +34,16 @@ struct BytecodeProgram {
     std::string producer = environmentSummary();
     std::string entry = std::string{source_function::kMain};
     std::vector<FunctionBytecode> functions;
+    // FFI 外部绑定表：name -> {arch, sys, libPath, symbol, sha512Chain}。
+    struct ExternalBinding {
+        std::string name;
+        std::string arch;
+        std::string sys;
+        std::string libPath;
+        std::string symbol;
+        std::vector<std::string> sha512Chain;
+    };
+    std::vector<ExternalBinding> externalBindings;
 };
 
 std::string instructionToString(const Instruction& instruction);

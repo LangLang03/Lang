@@ -88,6 +88,7 @@ inline constexpr std::uint8_t kLocalOpcodeRole = 0x06;
 inline constexpr std::uint8_t kLocalOpcodeOperatorInput = 0x07;
 inline constexpr std::uint8_t kLocalOpcodeReturn = 0x08;
 inline constexpr std::uint8_t kLocalOpcodeHalt = 0x09;
+inline constexpr std::uint8_t kLocalOpcodeApply = 0x0A;
 
 // 66 个平台特化 opcode 值 = (TORTURE_PLATFORM_ID << 8) | kLocalOpcode*
 inline constexpr std::uint16_t kOpcodeVerify =
@@ -222,6 +223,7 @@ inline constexpr std::uint16_t kOpcodeReturn =
     (static_cast<std::uint16_t>(TORTURE_PLATFORM_ID) << 8) | kLocalOpcodeReturn;
 inline constexpr std::uint16_t kOpcodeHalt =
     (static_cast<std::uint16_t>(TORTURE_PLATFORM_ID) << 8) | kLocalOpcodeHalt;
+inline constexpr std::uint16_t kOpcodeApply = static_cast<std::uint16_t>((static_cast<std::uint16_t>(TORTURE_PLATFORM_ID) << 8) | kLocalOpcodeApply);
 
 static_assert(kLocalOpcodeVerify == 0xC7, "linux_arm64 local opcode range must start at 0xC7");
 static_assert(kLocalOpcodePrintLine == 0xFF, "linux_arm64 local opcode first segment must end at 0xFF");

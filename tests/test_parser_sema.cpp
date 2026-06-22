@@ -14,7 +14,7 @@ namespace {
 constexpr auto validProgram = R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x = 41;
+    declare mutable readable writable purpose computational scope local int of width bit64 x = 41;
     assign x = compute (x + 1) with overflow trap;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain root with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
@@ -42,7 +42,13 @@ TEST_CASE("parser and sema accept the first vertical smoke program", "[parser][s
     REQUIRE(parsed.has_value());
     CHECK(parsed->functions.size() == 1);
     CHECK(parsed->functions.front().name == "main");
-    CHECK(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    const auto semaOk = torture::compiler::checkProgramSemantics(*parsed, diagnostics);
+    if (!semaOk) {
+        for (const auto& d : diagnostics.all()) {
+            UNSCOPED_INFO(d.code << ": " << d.message);
+        }
+    }
+    CHECK(semaOk);
     CHECK_FALSE(diagnostics.hasErrors());
 }
 
@@ -62,7 +68,7 @@ function public callable returnable void main() code size 128 max stack size 64 
 TEST_CASE("sema requires verifyfunctionidentity first", "[sema]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
-    proceed declare mutable readable writable purpose computational scope local int:32 x = 0;
+    proceed declare mutable readable writable purpose computational scope local int of width bit32 x = 0;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -105,7 +111,7 @@ TEST_CASE("sema rejects operatorinput outside approval functions", "[sema][appro
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local bool:1 decision = false;
+    declare mutable readable writable purpose computational scope local bool of width bit1 decision = false;
     operatorinput prompt "approve" timeout 1000 into decision with io operation because literal "declared operator input";
 }
 )"};
@@ -124,7 +130,7 @@ TEST_CASE("parser rejects impure event blocks", "[parser][event]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x { onread assign x = 1; } = 0;
+    declare mutable readable writable purpose computational scope local int of width bit32 x { onread assign x = 1; } = 0;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -139,12 +145,12 @@ function public callable returnable void main() code size 128 max stack size 64 
 
 TEST_CASE("sema rejects mismatched function pointer assignments", "[sema][fptr]") {
     torture::SourceFile source{"<test>", R"(require ecc;
-function public callable void target(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+function public callable void target(readable int of width bit32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
 }
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose linkage scope local fptr<return:void, params:(int:64), security:1, maxstack:64, codesize:128> fp;
+    declare mutable readable writable purpose linkage scope local fptr<return:void, params:(int of width bit64), security:1, maxstack:64, codesize:128> fp;
     authorize fptr assignment of fp to target with capture { } with attest "bad" with authority chain root;
 }
 )"};
@@ -163,7 +169,7 @@ TEST_CASE("sema enforces readable and writable variable access", "[sema][access]
     torture::SourceFile readonlySource{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable purpose computational scope local int:32 x = 0;
+    declare mutable readable purpose computational scope local int of width bit32 x = 0;
     assign x = 1;
 }
 )"};
@@ -179,7 +185,7 @@ function public callable returnable void main() code size 128 max stack size 64 
     torture::SourceFile writeonlySource{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable writable purpose computational scope local int:32 x = 1;
+    declare mutable writable purpose computational scope local int of width bit64 x = 1;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
@@ -197,8 +203,8 @@ TEST_CASE("sema rejects direct assignment across purposes", "[sema][purpose]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 src = 1;
-    declare mutable readable writable purpose storage scope local int:32 dst = 0;
+    declare mutable readable writable purpose computational scope local int of width bit32 src = 1;
+    declare mutable readable writable purpose storage scope local int of width bit32 dst = 0;
     assign dst = src;
 }
 )"};
@@ -235,7 +241,7 @@ TEST_CASE("sema requires IO operations to declare themselves", "[sema][io]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x = 7;
+    declare mutable readable writable purpose computational scope local int of width bit64 x = 7;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
@@ -280,7 +286,7 @@ TEST_CASE("sema enforces declared local variable counts", "[sema][locals]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 locals 0 authorized by root requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x = 0;
+    declare mutable readable writable purpose computational scope local int of width bit32 x = 0;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -354,18 +360,18 @@ TEST_CASE("sema accepts comparisons with matching bit widths and pointer permiss
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 signedvalue = 1;
-    declare mutable readable writable purpose computational scope local uint:32 unsignedvalue = 2;
-    declare mutable readable writable purpose computational scope local char:8 letter = 65;
-    declare mutable readable writable purpose computational scope local char:8 other = 66;
-    declare mutable readable writable purpose computational scope local bool:1 enabled = true;
-    declare mutable readable writable purpose computational scope local bool:1 disabled = false;
-    declare mutable readable writable purpose computational scope local ptr<readable, int:32> left;
-    declare mutable readable writable purpose computational scope local ptr<readable, int:32> right;
-    declare mutable readable writable purpose computational scope local bool:1 numericok = signedvalue authorize use operator < unsignedvalue because literal "numeric comparison authorizes less-than operator use";
-    declare mutable readable writable purpose computational scope local bool:1 charok = letter authorize use operator != other because literal "character comparison authorizes inequality operator use";
-    declare mutable readable writable purpose computational scope local bool:1 boolok = enabled authorize use operator == disabled because literal "boolean comparison authorizes equality operator use";
-    declare mutable readable writable purpose computational scope local bool:1 ptrok = left authorize use operator == right because literal "pointer comparison authorizes equality operator use";
+    declare mutable readable writable purpose computational scope local int of width bit32 signedvalue = 1;
+    declare mutable readable writable purpose computational scope local uint of width bit32 unsignedvalue = 2;
+    declare mutable readable writable purpose computational scope local char of width bit8 letter = 65;
+    declare mutable readable writable purpose computational scope local char of width bit8 other = 66;
+    declare mutable readable writable purpose computational scope local bool of width bit1 enabled = true;
+    declare mutable readable writable purpose computational scope local bool of width bit1 disabled = false;
+    declare mutable readable writable purpose computational scope local ptr<readable, int of width bit32> left;
+    declare mutable readable writable purpose computational scope local ptr<readable, int of width bit32> right;
+    declare mutable readable writable purpose computational scope local bool of width bit1 numericok = signedvalue authorize use operator < unsignedvalue because literal "numeric comparison authorizes less-than operator use";
+    declare mutable readable writable purpose computational scope local bool of width bit1 charok = letter authorize use operator != other because literal "character comparison authorizes inequality operator use";
+    declare mutable readable writable purpose computational scope local bool of width bit1 boolok = enabled authorize use operator == disabled because literal "boolean comparison authorizes equality operator use";
+    declare mutable readable writable purpose computational scope local bool of width bit1 ptrok = left authorize use operator == right because literal "pointer comparison authorizes equality operator use";
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -374,7 +380,13 @@ function public callable returnable void main() code size 256 max stack size 128
     const auto lexed = torture::compiler::lexSource(source, diagnostics);
     auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
     REQUIRE(parsed.has_value());
-    CHECK(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    const auto semaOk = torture::compiler::checkProgramSemantics(*parsed, diagnostics);
+    if (!semaOk) {
+        for (const auto& d : diagnostics.all()) {
+            UNSCOPED_INFO(d.code << ": " << d.message);
+        }
+    }
+    CHECK(semaOk);
     CHECK_FALSE(diagnostics.hasErrors());
 }
 
@@ -401,9 +413,9 @@ TEST_CASE("sema rejects numeric comparisons with mismatched bit widths", "[sema]
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 narrow = 1;
-    declare mutable readable writable purpose computational scope local int:64 wide = 1;
-    declare mutable readable writable purpose computational scope local bool:1 same = narrow authorize use operator == wide because literal "mismatched-width test authorizes equality operator use";
+    declare mutable readable writable purpose computational scope local int of width bit32 narrow = 1;
+    declare mutable readable writable purpose computational scope local int of width bit64 wide = 1;
+    declare mutable readable writable purpose computational scope local bool of width bit1 same = narrow authorize use operator == wide because literal "mismatched-width test authorizes equality operator use";
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -421,9 +433,9 @@ TEST_CASE("sema requires explicit operator authorization for comparisons", "[sem
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 left = 1;
-    declare mutable readable writable purpose computational scope local int:32 right = 1;
-    declare mutable readable writable purpose computational scope local bool:1 same = left == right;
+    declare mutable readable writable purpose computational scope local int of width bit32 left = 1;
+    declare mutable readable writable purpose computational scope local int of width bit32 right = 1;
+    declare mutable readable writable purpose computational scope local bool of width bit1 same = left == right;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -441,9 +453,9 @@ TEST_CASE("sema rejects boolean order comparisons", "[sema][types][compare]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local bool:1 left = true;
-    declare mutable readable writable purpose computational scope local bool:1 right = false;
-    declare mutable readable writable purpose computational scope local bool:1 ordered = left authorize use operator < right because literal "boolean order test authorizes less-than operator use";
+    declare mutable readable writable purpose computational scope local bool of width bit1 left = true;
+    declare mutable readable writable purpose computational scope local bool of width bit1 right = false;
+    declare mutable readable writable purpose computational scope local bool of width bit1 ordered = left authorize use operator < right because literal "boolean order test authorizes less-than operator use";
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -461,9 +473,9 @@ TEST_CASE("sema rejects pointer comparisons with different access permissions", 
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local ptr<readable, int:32> readableptr;
-    declare mutable readable writable purpose computational scope local ptr<writable, int:32> writableptr;
-    declare mutable readable writable purpose computational scope local bool:1 same = readableptr authorize use operator == writableptr because literal "pointer mismatch test authorizes equality operator use";
+    declare mutable readable writable purpose computational scope local ptr<readable, int of width bit32> readableptr;
+    declare mutable readable writable purpose computational scope local ptr<writable, int of width bit32> writableptr;
+    declare mutable readable writable purpose computational scope local bool of width bit1 same = readableptr authorize use operator == writableptr because literal "pointer mismatch test authorizes equality operator use";
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -495,7 +507,7 @@ function public callable returnable void main() code size 256 max stack size 128
     proceed verifyfunctionidentity();
     declare mutable readable writable purpose storage scope local gradebook left;
     declare mutable readable writable purpose storage scope local gradebook right;
-    declare mutable readable writable purpose computational scope local bool:1 same = left authorize use operator == right because literal "struct comparison test authorizes equality operator use";
+    declare mutable readable writable purpose computational scope local bool of width bit1 same = left authorize use operator == right because literal "struct comparison test authorizes equality operator use";
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -507,4 +519,153 @@ function public callable returnable void main() code size 256 max stack size 128
     CHECK_FALSE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
     REQUIRE(diagnostics.hasErrors());
     CHECK(hasDiagnosticCode(diagnostics, "struct-comparison-requires-method"));
+}
+
+TEST_CASE("sema rejects legacy int:32 width literal", "[sema][widthliteral]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int:32 x = 0;
+}
+)"};
+    torture::Diagnostics diagnostics;
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    for (const auto& d : diagnostics.all()) { UNSCOPED_INFO(d.code << " " << d.message); }
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    for (const auto& d : diagnostics.all()) { UNSCOPED_INFO(d.code << " " << d.message); }
+    REQUIRE(parsed.has_value());
+    CHECK_FALSE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(hasDiagnosticCode(diagnostics, "width-must-use-bit-literal"));
+}
+
+TEST_CASE("sema accepts new int of width bit32 width literal", "[sema][widthliteral]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    declare mutable readable writable purpose computational scope local int of width bit32 x = 0;
+    assign x = compute (x + 1) with overflow trap;
+    authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain root with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    CHECK(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    CHECK_FALSE(diagnostics.hasErrors());
+}
+
+TEST_CASE("parser rejects apply statement missing approval clause", "[parser][apply]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+require std;
+stddecl literal "ok" because literal "ok";
+external arch x64 sys linux lib "/usr/lib/libdemo.so" symbol add as addbinding signature sha512 "A" "f29a396aede83e52df63b27609a99240e52b65cc4754af36021be27c2eb81c86bd6dcb60226d7c9ef1407f48f56e13ba6364b039a71ce51c838eb3aa7e033208" "61d77cdf5f3144414c40c9e4e011268fac92661aefb7452161b327fede6e89c8fd0c30525242ad6b7a111c0f2a64d5105c5b09895a4603db91ec07d9feb05454" declaredescription literal "bind" because literal "ok" ;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    apply external addbinding at security level 1 with memory limit 128 with timeout 1000 with justification "do it" with arguments { } discarding return predictstackdepth 4 with authority chain root ;
+}
+)"};
+    torture::Diagnostics diagnostics;
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    CHECK_FALSE(parsed.has_value());
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(hasDiagnosticCode(diagnostics, "expected-token"));
+}
+
+TEST_CASE("parser rejects apply statement missing architecture restatement", "[parser][apply]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+require std;
+stddecl literal "ok" because literal "ok";
+external arch x64 sys linux lib "/usr/lib/libdemo.so" symbol add as addbinding signature sha512 "A" "f29a396aede83e52df63b27609a99240e52b65cc4754af36021be27c2eb81c86bd6dcb60226d7c9ef1407f48f56e13ba6364b039a71ce51c838eb3aa7e033208" "61d77cdf5f3144414c40c9e4e011268fac92661aefb7452161b327fede6e89c8fd0c30525242ad6b7a111c0f2a64d5105c5b09895a4603db91ec07d9feb05454" declaredescription literal "bind" because literal "ok" ;
+function public approval returnable readable bool of width bit1 alwaysapprove(readable char of width bit8[] note) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    return true;
+}
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    apply external addbinding at security level 1 with memory limit 128 with timeout 1000 with justification "do it" with arguments { } discarding return predictstackdepth 4 with authority chain root with approval of alwaysapprove with approval justification "ok" with approval timeout 1000 ;
+}
+)"};
+    torture::Diagnostics diagnostics;
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    CHECK_FALSE(parsed.has_value());
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(hasDiagnosticCode(diagnostics, "expected-token"));
+}
+
+TEST_CASE("sema rejects FFI binding with broken SHA-512 chain", "[sema][ffi]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+require std;
+stddecl literal "bad" because literal "intentionally broken";
+external arch x64 sys linux lib "/usr/lib/libdemo.so" symbol add as addbinding signature sha512 "A" "deadbeef" "f29a396aede83e52df63b27609a99240e52b65cc4754af36021be27c2eb81c86bd6dcb60226d7c9ef1407f48f56e13ba6364b039a71ce51c838eb3aa7e033208" declaredescription literal "bind c add" because literal "ffi binding for c add" ;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin declaredescription literal "m" because literal "r"; returndescription literal "v" because literal "r"; {
+    proceed verifyfunctionidentity();
+}
+)"};
+    torture::Diagnostics diagnostics;
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    CHECK_FALSE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(hasDiagnosticCode(diagnostics, "ffi-sha512-chain-broken"));
+}
+
+TEST_CASE("sema rejects std call when require std is missing", "[sema][std]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+    authorize invocation of std::printtext at security level 1 with memory limit 128 with timeout 1000 with justification "print" with arguments { value by value = literal "hi" } discarding return predictstackdepth 4 with authority chain root with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+}
+)"};
+    torture::Diagnostics diagnostics;
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    CHECK_FALSE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(hasDiagnosticCode(diagnostics, "std-not-required"));
+}
+
+TEST_CASE("sema rejects external binding with non-absolute library path", "[sema][ffi]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+external arch x64 sys linux lib "libdemo.so" symbol add as addbinding signature sha512 "A" "f29a396aede83e52df63b27609a99240e52b65cc4754af36021be27c2eb81c86bd6dcb60226d7c9ef1407f48f56e13ba6364b039a71ce51c838eb3aa7e033208" "61d77cdf5f3144414c40c9e4e011268fac92661aefb7452161b327fede6e89c8fd0c30525242ad6b7a111c0f2a64d5105c5b09895a4603db91ec07d9feb05454" declaredescription literal "bind c add" because literal "ffi binding for c add" ;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+}
+)"};
+    torture::Diagnostics diagnostics;
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    CHECK_FALSE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(hasDiagnosticCode(diagnostics, "ffi-library-path-must-be-absolute"));
+}
+
+TEST_CASE("sema rejects external binding with unsupported architecture", "[sema][ffi]") {
+    torture::SourceFile source{"<test>", R"(require ecc;
+external arch zx80 sys linux lib "/usr/lib/libdemo.so" symbol add as addbinding signature sha512 "A" "f29a396aede83e52df63b27609a99240e52b65cc4754af36021be27c2eb81c86bd6dcb60226d7c9ef1407f48f56e13ba6364b039a71ce51c838eb3aa7e033208" "61d77cdf5f3144414c40c9e4e011268fac92661aefb7452161b327fede6e89c8fd0c30525242ad6b7a111c0f2a64d5105c5b09895a4603db91ec07d9feb05454" declaredescription literal "bind c add" because literal "ffi binding for c add" ;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
+    proceed verifyfunctionidentity();
+}
+)"};
+    torture::Diagnostics diagnostics;
+    REQUIRE(torture::compiler::checkIndentation(source, diagnostics));
+    const auto lexed = torture::compiler::lexSource(source, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    CHECK_FALSE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    REQUIRE(diagnostics.hasErrors());
+    CHECK(hasDiagnosticCode(diagnostics, "ffi-unsupported-architecture"));
 }

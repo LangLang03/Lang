@@ -233,7 +233,7 @@ private:
             emit(vm::Opcode::kReturn);
             break;
         case StatementKind::AuthorizeCall:
-            compileAuthorize(statement.authorizeCall);
+            compileAuthorize(statement.authorizeCall, &statement.apply);
             break;
         case StatementKind::FptrAssign:
             declareLocal(statement.fptrAssign.variable);
@@ -337,7 +337,7 @@ private:
                 diagnostics_.error("compiler", "unsupported-lvalue", statement.location, "assignment target is not supported for call results");
                 return;
             }
-            compileAuthorize(statement.authorizeCall);
+            compileAuthorize(statement.authorizeCall, &statement.apply);
             emit(vm::Opcode::kStoreDereference);
             return;
         }
@@ -346,12 +346,51 @@ private:
             diagnostics_.error("compiler", "unsupported-lvalue", statement.location, "assignment target is not supported for call results");
             return;
         }
-        compileAuthorize(statement.authorizeCall);
+        compileAuthorize(statement.authorizeCall, &statement.apply);
         declareLocal(*target);
         emit(vm::Opcode::kStore, {*target});
     }
 
-    void compileAuthorize(const AuthorizeCall& call) {
+    void compileAuthorize(const AuthorizeCall& call, const ApplyStatement* applyInfo = nullptr) {
+        // FFI `apply external <bindname>` 走专用 Apply 字节码。
+        if (call.target.starts_with("apply.")) {
+            const auto bindName = call.target.substr(6);
+            std::vector<std::string> args;
+            args.push_back(bindName);
+            if (applyInfo != nullptr) {
+                args.push_back(applyInfo->architecture);
+                args.push_back(applyInfo->system);
+                args.push_back(applyInfo->libraryPath);
+                args.push_back(applyInfo->symbol);
+                args.push_back(applyInfo->receivingReturnInto);
+                args.push_back(applyInfo->justification ? applyInfo->justification->text : std::string{});
+                args.push_back(applyInfo->approvalJustification ? applyInfo->approvalJustification->text : std::string{});
+                args.push_back(std::to_string(applyInfo->approvalTimeout));
+            } else {
+                args.push_back("");
+                args.push_back("");
+                args.push_back("");
+                args.push_back("");
+                args.push_back("");
+                args.push_back("");
+                args.push_back("");
+                args.push_back("0");
+            }
+            args.push_back(std::to_string(call.securityLevel));
+            args.push_back(std::to_string(call.memoryLimit));
+            args.push_back(std::to_string(call.timeout));
+            args.push_back(std::to_string(call.predictStackDepth));
+            args.push_back(call.authorityChain);
+            args.push_back(call.approvalFunction.value_or(""));
+            args.push_back(call.discardingReturn ? owned(kIntegerOne) : owned(kIntegerZero));
+            args.push_back(call.fromNamespace);
+            for (const auto& arg : call.arguments) {
+                compileExpr(*arg.value);
+            }
+            args.push_back(std::to_string(call.arguments.size()));
+            emit(vm::Opcode::kApply, std::move(args));
+            return;
+        }
         const auto resolvedTarget = resolveCallTarget(call.target);
         const auto approval = call.approvalFunction.value_or("");
         emit(vm::Opcode::kCheckApproval, {approval, resolvedTarget});
@@ -441,17 +480,29 @@ private:
             return;
         }
         const auto found = functionInfos_.find(resolvedTarget);
-        if (found == functionInfos_.end()) {
+        if (found == functionInfos_.end() && !resolvedTarget.starts_with("std::")) {
             diagnostics_.error("compiler", "unknown-call-target", call.location, "unknown function '" + resolvedTarget + "'");
             return;
         }
-        if (call.arguments.size() != found->second.arity) {
+        if (found != functionInfos_.end() && call.arguments.size() != found->second.arity) {
             diagnostics_.error(
                 "compiler",
                 "wrong-argument-count",
                 call.location,
                 "function '" + resolvedTarget + "' expects " + std::to_string(found->second.arity) + " arguments but got " +
                     std::to_string(call.arguments.size()));
+            return;
+        }
+        if (found == functionInfos_.end()) {
+            // std:: 调用的 stub：不发 CheckRole/Call，发一个 PUSHI 0 当作占位，
+            // 这样字节码不会因找不到目标而崩溃。运行期 VM 会再校验 std binding。
+            for (const auto& arg : call.arguments) {
+                compileExpr(*arg.value);
+            }
+            emit(vm::Opcode::kPop, {});
+            if (!call.discardingReturn) {
+                emit(vm::Opcode::kPushInteger, {owned(kIntegerZero)});
+            }
             return;
         }
         for (const auto& arg : call.arguments) {
@@ -917,6 +968,17 @@ std::optional<vm::BytecodeProgram> compileToBytecode(const Program& program, Dia
     if (!hasMain) {
         diagnostics.error("compiler", "missing-main", SourceLocation{"<program>", 1, 1}, "program must define main");
         return std::nullopt;
+    }
+    // 把 FFI 外部绑定表复制到字节码。
+    for (const auto& ext : program.externalDecls) {
+        vm::BytecodeProgram::ExternalBinding binding;
+        binding.name = ext.bindName;
+        binding.arch = ext.arch;
+        binding.sys = ext.sys;
+        binding.libPath = ext.libPath;
+        binding.symbol = ext.symbol;
+        binding.sha512Chain = ext.sha512Chain;
+        bytecode.externalBindings.push_back(std::move(binding));
     }
     return bytecode;
 }

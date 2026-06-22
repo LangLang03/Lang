@@ -1,5 +1,6 @@
 #include "compiler/sema.h"
 
+#include "common/sha512.h"
 #include "vm/bytecode.h"
 
 #include <array>
@@ -77,6 +78,47 @@ bool isPrimitiveOrBuiltinType(const std::string& text) {
         "float:32", "float:64", "char:8", "char:32", "char:8[]", "char:32[]", "bool:1", "chain"});
 }
 
+// === 标准库与 FFI 复杂化：白名单常量 ===
+// 11 个体系结构 ID；与 spec 中列出的 11 个 archid 一一对应。
+const std::unordered_set<std::string>& supportedArchitectures() {
+    static const std::unordered_set<std::string> value = {
+        "x86", "x64", "arm32", "arm64",
+        "riscv32", "riscv64", "mips32", "mips64",
+        "sparc32", "sparc64", "powerpc64"
+    };
+    return value;
+}
+
+// 7 个操作系统 ID。
+const std::unordered_set<std::string>& supportedSystems() {
+    static const std::unordered_set<std::string> value = {
+        "linux", "windows", "macos", "android", "freebsd", "openbsd", "uefi"
+    };
+    return value;
+}
+
+// 检查三段 SHA-512 链：seg1 -> sha512(seg1) -> sha512(sha512(seg1))。
+bool validateSha512Chain(const std::vector<std::string>& chain, Diagnostics& diagnostics, const SourceLocation& location) {
+    if (chain.size() != 3) {
+        diagnostics.error("sema", "ffi-sha512-chain-wrong-size", location,
+            "ffi signature must have exactly 3 sha512 segments");
+        return false;
+    }
+    const auto h1 = torture::common::sha512Hex(chain[0]);
+    if (h1 != chain[1]) {
+        diagnostics.error("sema", "ffi-sha512-chain-broken", location,
+            "ffi sha512 chain broken: segment 2 must equal sha512(segment 1)");
+        return false;
+    }
+    const auto h2 = torture::common::sha512Hex(chain[1]);
+    if (h2 != chain[2]) {
+        diagnostics.error("sema", "ffi-sha512-chain-broken", location,
+            "ffi sha512 chain broken: segment 3 must equal sha512(segment 2)");
+        return false;
+    }
+    return true;
+}
+
 bool isAccessType(const std::string& text) {
     return isOneOf(text, {"readable", "writable", "readablewritable", "writablereadable"});
 }
@@ -105,12 +147,28 @@ bool isPointerLikeType(const std::string& text) {
     return (text.starts_with("ptr<") || text.starts_with("ref<")) && text.ends_with(">");
 }
 
+bool isNumericType(const std::string& type) {
+    if (type.starts_with("int:") || type.starts_with("uint:") || type.starts_with("float:") || type.starts_with("char:") ||
+        type == "bool:1") {
+        return true;
+    }
+    if (type.starts_with("intofwidth") || type.starts_with("uintofwidth") || type.starts_with("floatofwidth") ||
+        type.starts_with("charofwidth") || type.starts_with("boolofwidth")) {
+        return true;
+    }
+    return false;
+}
+
 bool isValidTypeText(const std::string& text, const std::unordered_set<std::string>& structNames, bool allowVoid) {
     const auto value = normalized(text);
     if (allowVoid && value == vm::source_literal::kVoidType) {
         return true;
     }
     if (isPrimitiveOrBuiltinType(value)) {
+        return true;
+    }
+    // 新写法 `int of width bitN` 等归一化后是 `intofwidthbitN`，也接受为合法类型。
+    if (isNumericType(value)) {
         return true;
     }
     if (structNames.contains(value)) {
@@ -137,7 +195,22 @@ bool isValidTypeText(const std::string& text, const std::unordered_set<std::stri
     return false;
 }
 
-bool isValidType(const TypeName& type, const std::unordered_set<std::string>& structNames, bool allowVoid) {
+bool isValidType(const TypeName& type, const std::unordered_set<std::string>& structNames, bool allowVoid,
+    Diagnostics* diagnostics = nullptr, const SourceLocation* location = nullptr) {
+    if (type.legacyWidthNotation) {
+        if (diagnostics && location) {
+            diagnostics->error("sema", "width-must-use-bit-literal", *location,
+                "legacy width notation '" + type.text + "' is rejected; use 'int of width bitN' or similar");
+        }
+        return false;  // 旧写法 `int:32` 直接拒绝。
+    }
+    if (type.widthBit.has_value()) {
+        // 新写法 `int of width bitN` 归一化成 `int:N`。
+        const auto base = type.text.substr(0, type.text.find(' '));
+        if (base == "int" || base == "uint" || base == "float" || base == "char" || base == "bool") {
+            return isValidTypeText(base + ":" + std::to_string(*type.widthBit), structNames, allowVoid);
+        }
+    }
     return isValidTypeText(type.text, structNames, allowVoid);
 }
 
@@ -208,11 +281,6 @@ bool checkFptrMatches(
         ok = false;
     }
     return ok;
-}
-
-bool isNumericType(const std::string& type) {
-    return type.starts_with("int:") || type.starts_with("uint:") || type.starts_with("float:") || type.starts_with("char:") ||
-        type == "bool:1";
 }
 
 bool isTypeCompatible(const std::string& expected, const std::string& actual) {
@@ -297,6 +365,9 @@ std::optional<std::string> inferCallReturnType(
     }
     const auto resolvedTarget = resolveCallTarget(call.target, locals);
     const auto found = functions->find(resolvedTarget);
+    if (found == functions->end() && !resolvedTarget.starts_with("std::")) {
+        return std::nullopt;
+    }
     if (found == functions->end()) {
         return std::nullopt;
     }
@@ -443,6 +514,22 @@ std::optional<ScalarInfo> scalarInfo(const std::string& rawType) {
         return ScalarInfo{ScalarKind::Character, *width};
     }
     if (type == "bool:1") {
+        return ScalarInfo{ScalarKind::Boolean, 1};
+    }
+    // 新写法 `int of width bitN` 归一化后是 `intofwidthbitN`，提取位宽。
+    if (type.starts_with("intofwidthbit")) {
+        return ScalarInfo{ScalarKind::SignedInteger, parseSmallInt(type.substr(std::string{"intofwidthbit"}.size()))};
+    }
+    if (type.starts_with("uintofwidthbit")) {
+        return ScalarInfo{ScalarKind::UnsignedInteger, parseSmallInt(type.substr(std::string{"uintofwidthbit"}.size()))};
+    }
+    if (type.starts_with("floatofwidthbit")) {
+        return ScalarInfo{ScalarKind::Float, parseSmallInt(type.substr(std::string{"floatofwidthbit"}.size()))};
+    }
+    if (type.starts_with("charofwidthbit")) {
+        return ScalarInfo{ScalarKind::Character, parseSmallInt(type.substr(std::string{"charofwidthbit"}.size()))};
+    }
+    if (type == "boolofwidthbit1") {
         return ScalarInfo{ScalarKind::Boolean, 1};
     }
     return std::nullopt;
@@ -885,7 +972,7 @@ bool checkImmutableAssignments(
             continue;
         }
         if (statement->kind == StatementKind::VarDecl) {
-            if (!isValidType(statement->varDecl.type, structNames, false)) {
+            if (!isValidType(statement->varDecl.type, structNames, false, &diagnostics, &statement->location)) {
                 diagnostics.error(
                     "sema",
                     "invalid-type",
@@ -903,7 +990,7 @@ bool checkImmutableAssignments(
             }
             locals[statement->varDecl.name] = LocalInfo{
                 statement->varDecl.immutable,
-                statement->varDecl.type.text,
+                normalized(statement->varDecl.type.text),
                 statement->varDecl.access,
                 statement->varDecl.purpose,
                 isDeclaredLiteralExpr(statement->varDecl.initializer.get(), locals),
@@ -1035,7 +1122,7 @@ bool checkImmutableAssignments(
                     statement->location,
                     "operatorinput target '" + statement->identifier + "' is not declared");
                 ok = false;
-            } else if (found->second.type != "bool:1") {
+            } else if (found->second.type != "bool:1" && found->second.type != "boolofwidthbit1") {
                 diagnostics.error(
                     "sema",
                     "operatorinput-non-bool",
@@ -1230,10 +1317,18 @@ bool checkAuthorizeCall(
     }
 
     const auto resolvedTarget = resolveCallTarget(call.target, locals);
+    // FFI `apply.<bindname>` 走外部绑定路径，不在 functions 表中查找。
+    if (resolvedTarget.starts_with("apply.")) {
+        return true;
+    }
     const auto target = functions.find(resolvedTarget);
-    if (target == functions.end()) {
+    if (target == functions.end() && !resolvedTarget.starts_with("std::")) {
         diagnostics.error("sema", "unknown-call-target", location, "unknown call target '" + resolvedTarget + "'");
         return false;
+    }
+    if (resolvedTarget.starts_with("std::")) {
+        // std:: 调用的实参 / 返回值校验由 checkApplyAndStdNamespaceInBody 在另一处处理。
+        return true;
     }
     if (isIoBuiltinTarget(resolvedTarget)) {
         ok = checkIoDeclaration(call.io, location, diagnostics, "authorized IO invocation") && ok;
@@ -1373,11 +1468,327 @@ bool checkCalls(
 
 } // namespace
 
+namespace {
+bool descriptionClauseHasLiteral(const DescriptionClause& clause) {
+    return isDeclaredLiteralExpr(clause.reason.get());
+}
+
+bool checkFunctionDescriptions(const FunctionDecl& function, Diagnostics& diagnostics) {
+    bool ok = true;
+    bool hasDeclDesc = false;
+    bool hasReturnDesc = false;
+    for (const auto& desc : function.descriptions) {
+        if (desc.kind == DescriptionKind::Declaration) {
+            hasDeclDesc = true;
+        } else if (desc.kind == DescriptionKind::Return) {
+            hasReturnDesc = true;
+        }
+        if (!descriptionClauseHasLiteral(desc)) {
+            diagnostics.error(
+                "sema",
+                "description-missing-because-literal",
+                desc.location,
+                "description clause must end with because literal \"...\"");
+            ok = false;
+        }
+    }
+    if (!hasDeclDesc) {
+        diagnostics.error(
+            "sema",
+            "function-missing-declaredescription",
+            function.location,
+            "function must declare a declaredescription clause");
+        ok = false;
+    }
+    if (function.returnable && function.returnType.text != vm::source_literal::kVoidType && !hasReturnDesc) {
+        diagnostics.error(
+            "sema",
+            "function-missing-returndescription",
+            function.location,
+            "returnable function must declare a returndescription clause");
+        ok = false;
+    }
+    return ok;
+}
+
+bool checkParamDescriptions(const FunctionDecl& function, Diagnostics& diagnostics) {
+    bool ok = true;
+    for (const auto& param : function.params) {
+        if (param.descriptions.empty()) {
+            diagnostics.error(
+                "sema",
+                "param-missing-parameterdescription",
+                param.location,
+                "parameter '" + param.name + "' must declare a parameterdescription clause");
+            ok = false;
+            continue;
+        }
+        for (const auto& desc : param.descriptions) {
+            if (desc.kind != DescriptionKind::Parameter) {
+                diagnostics.error(
+                    "sema",
+                    "description-kind-mismatch",
+                    desc.location,
+                    "parameter description must be of kind parameterdescription");
+                ok = false;
+            }
+            if (!descriptionClauseHasLiteral(desc)) {
+                diagnostics.error(
+                    "sema",
+                    "description-missing-because-literal",
+                    desc.location,
+                    "parameterdescription clause must end with because literal \"...\"");
+                ok = false;
+            }
+        }
+    }
+    return ok;
+}
+
+bool checkStructDescriptions(const StructDecl& structure, Diagnostics& diagnostics) {
+    bool ok = true;
+    if (structure.descriptions.empty()) {
+        diagnostics.error(
+            "sema",
+            "typedefinition-missing-description",
+            structure.location,
+            "type definition '" + structure.name + "' must declare a typedefinitiondescription clause");
+        ok = false;
+    } else {
+        for (const auto& desc : structure.descriptions) {
+            if (desc.kind != DescriptionKind::TypeDefinition) {
+                diagnostics.error(
+                    "sema",
+                    "description-kind-mismatch",
+                    desc.location,
+                    "type definition description must be of kind typedefinitiondescription");
+                ok = false;
+            }
+            if (!descriptionClauseHasLiteral(desc)) {
+                diagnostics.error(
+                    "sema",
+                    "description-missing-because-literal",
+                    desc.location,
+                    "typedefinitiondescription clause must end with because literal \"...\"");
+                ok = false;
+            }
+        }
+    }
+    return ok;
+}
+
+bool checkVarDescriptionsInBody(
+    const std::vector<StatementPtr>& body,
+    Diagnostics& diagnostics) {
+    bool ok = true;
+    for (const auto& statement : body) {
+        if (!statement) {
+            continue;
+        }
+        if (statement->kind == StatementKind::VarDecl) {
+            if (statement->varDecl.descriptions.empty()) {
+                diagnostics.error(
+                    "sema",
+                    "variable-missing-variabledescription",
+                    statement->location,
+                    "variable '" + statement->varDecl.name + "' must declare a variabledescription clause");
+                ok = false;
+            } else {
+                for (const auto& desc : statement->varDecl.descriptions) {
+                    if (desc.kind != DescriptionKind::Variable) {
+                        diagnostics.error(
+                            "sema",
+                            "description-kind-mismatch",
+                            desc.location,
+                            "variable description must be of kind variabledescription");
+                        ok = false;
+                    }
+                    if (!descriptionClauseHasLiteral(desc)) {
+                        diagnostics.error(
+                            "sema",
+                            "description-missing-because-literal",
+                            desc.location,
+                            "variabledescription clause must end with because literal \"...\"");
+                        ok = false;
+                    }
+                }
+            }
+        }
+        ok = checkVarDescriptionsInBody(statement->thenBody, diagnostics) && ok;
+        ok = checkVarDescriptionsInBody(statement->elseBody, diagnostics) && ok;
+    }
+    return ok;
+}
+
+// 校验 apply 语句 14 段手续是否齐备。
+bool checkApplyStatement(const ApplyStatement& apply, Diagnostics& diagnostics) {
+    bool ok = true;
+    if (apply.bindName.empty()) {
+        diagnostics.error("sema", "apply-missing-clause-1", apply.location,
+            "apply statement is missing clause 1: bind name");
+        ok = false;
+    }
+    if (apply.securityLevel <= 0) {
+        diagnostics.error("sema", "apply-missing-clause-2", apply.location,
+            "apply statement is missing clause 2: at security level N (must be positive)");
+        ok = false;
+    }
+    if (apply.memoryLimit <= 0) {
+        diagnostics.error("sema", "apply-missing-clause-3", apply.location,
+            "apply statement is missing clause 3: with memory limit M (must be positive)");
+        ok = false;
+    }
+    if (apply.timeout <= 0) {
+        diagnostics.error("sema", "apply-missing-clause-4", apply.location,
+            "apply statement is missing clause 4: with timeout T (must be positive)");
+        ok = false;
+    }
+    // 段 5：with io operation ... 是可选的。
+    if (!apply.justification || apply.justification->text.empty()) {
+        diagnostics.error("sema", "apply-missing-clause-6", apply.location,
+            "apply statement is missing clause 6: with justification \"...\"");
+        ok = false;
+    }
+    // 段 7：with arguments { ... } - arguments 为空也允许（无参 FFI）。
+    // 段 8：discarding return 与 receiving return into 二选一。
+    if (!apply.discardingReturn && apply.receivingReturnInto.empty()) {
+        diagnostics.error("sema", "apply-missing-clause-8", apply.location,
+            "apply statement must specify either 'discarding return' or 'receiving return into <var>'");
+        ok = false;
+    }
+    if (apply.predictStackDepth < 0) {
+        diagnostics.error("sema", "apply-missing-clause-9", apply.location,
+            "apply statement is missing clause 9: predictstackdepth P (must be non-negative)");
+        ok = false;
+    }
+    if (apply.authorityChain.empty()) {
+        diagnostics.error("sema", "apply-missing-clause-10", apply.location,
+            "apply statement is missing clause 10: with authority chain <role>");
+        ok = false;
+    }
+    if (!apply.approvalFunction) {
+        diagnostics.error("sema", "apply-missing-approval", apply.location,
+            "apply statement is missing clause 11: with approval of <approval_function>");
+        ok = false;
+    }
+    if (!apply.approvalJustification || apply.approvalJustification->text.empty()) {
+        diagnostics.error("sema", "apply-missing-clause-12", apply.location,
+            "apply statement is missing clause 12: with approval justification \"...\"");
+        ok = false;
+    }
+    if (apply.approvalTimeout <= 0) {
+        diagnostics.error("sema", "apply-missing-clause-13", apply.location,
+            "apply statement is missing clause 13: with approval timeout K (must be positive)");
+        ok = false;
+    }
+    if (apply.architecture.empty()) {
+        diagnostics.error("sema", "apply-missing-architecture-restatement", apply.location,
+            "apply statement is missing clause 14: with architecture <archid>");
+        ok = false;
+    }
+    if (apply.system.empty()) {
+        diagnostics.error("sema", "apply-missing-system-restatement", apply.location,
+            "apply statement is missing clause 14: with system <sysid>");
+        ok = false;
+    }
+    if (apply.libraryPath.empty() || apply.libraryPath.front() != '/') {
+        diagnostics.error("sema", "apply-missing-library-restatement", apply.location,
+            "apply statement is missing clause 14: with library path (absolute path required)");
+        ok = false;
+    }
+    if (apply.symbol.empty()) {
+        diagnostics.error("sema", "apply-missing-symbol-restatement", apply.location,
+            "apply statement is missing clause 14: with symbol <name>");
+        ok = false;
+    }
+    return ok;
+}
+
+// 遍历函数体，找出所有 apply 语句并校验 14 段；同时校验 std::xxx 调用的 from namespace 子句。
+bool checkApplyAndStdNamespaceInBody(
+    const std::vector<StatementPtr>& body,
+    bool requireStd,
+    Diagnostics& diagnostics) {
+    bool ok = true;
+    for (const auto& statement : body) {
+        if (!statement) {
+            continue;
+        }
+        if (statement->kind == StatementKind::AuthorizeCall) {
+            // apply 走 AuthorizeCall 路径但 statement->apply 已被填充。
+            if (statement->authorizeCall.target.starts_with("apply.")) {
+                ok = checkApplyStatement(statement->apply, diagnostics) && ok;
+            }
+            // std::xxx 调用的 namespace 校验。
+            if (statement->authorizeCall.target.starts_with("std::")) {
+                if (!requireStd) {
+                    diagnostics.error("sema", "std-not-required", statement->authorizeCall.location,
+                        "call to '" + statement->authorizeCall.target + "' requires 'require std;' at the top of the file");
+                    ok = false;
+                } else if (statement->authorizeCall.fromNamespace != "std") {
+                    diagnostics.error("sema", "std-namespace-required", statement->authorizeCall.location,
+                        "call to '" + statement->authorizeCall.target + "' must include 'with from namespace std' clause");
+                    ok = false;
+                }
+            }
+        }
+        ok = checkApplyAndStdNamespaceInBody(statement->thenBody, requireStd, diagnostics) && ok;
+        ok = checkApplyAndStdNamespaceInBody(statement->elseBody, requireStd, diagnostics) && ok;
+    }
+    return ok;
+}
+
+} // namespace
+
 bool checkProgramSemantics(const Program& program, Diagnostics& diagnostics) {
     bool ok = true;
     if (!program.requireEcc) {
         diagnostics.error("sema", "missing-ecc", SourceLocation{"<program>", 1, 1}, "source must start with require ecc;");
         ok = false;
+    }
+
+    // 校验 FFI 绑定：arch/sys 白名单 + lib 绝对路径 + SHA-512 链 + 描述子句存在性。
+    std::unordered_set<std::string> externalNames;
+    for (const auto& ext : program.externalDecls) {
+        if (!externalNames.insert(ext.bindName).second) {
+            diagnostics.error("sema", "ffi-duplicate-binding", ext.location,
+                "external binding name '" + ext.bindName + "' is declared more than once");
+            ok = false;
+        }
+        if (!supportedArchitectures().contains(ext.arch)) {
+            diagnostics.error("sema", "ffi-unsupported-architecture", ext.location,
+                "external architecture '" + ext.arch + "' is not supported");
+            ok = false;
+        }
+        if (!supportedSystems().contains(ext.sys)) {
+            diagnostics.error("sema", "ffi-unsupported-system", ext.location,
+                "external system '" + ext.sys + "' is not supported");
+            ok = false;
+        }
+        if (ext.libPath.empty() || ext.libPath.front() != '/') {
+            diagnostics.error("sema", "ffi-library-path-must-be-absolute", ext.location,
+                "external library path must be an absolute path starting with '/'");
+            ok = false;
+        }
+        if (!validateSha512Chain(ext.sha512Chain, diagnostics, ext.location)) {
+            ok = false;
+        }
+    }
+
+    // 校验 std 元说明子句。
+    if (program.requireStd && program.stdImport) {
+        bool hasStdDecl = false;
+        for (const auto& note : program.stdImport->notes) {
+            if (note.kind == MetaNoteKind::StdDecl) {
+                hasStdDecl = true;
+                break;
+            }
+        }
+        if (!hasStdDecl) {
+            diagnostics.error("sema", "std-missing-meta-decl", program.stdImport->location,
+                "require std must be followed by a stddecl meta note");
+            ok = false;
+        }
     }
 
     std::unordered_set<std::string> functionNames;
@@ -1610,13 +2021,16 @@ bool checkProgramSemantics(const Program& program, Diagnostics& diagnostics) {
             ok = false;
         }
         if (function.category == FunctionCategory::Approval) {
-            if (!function.returnable || function.returnType.text != "bool:1" || function.params.size() != 1 ||
-                function.params.front().type.text != "char:8[]") {
+            const auto retType = normalized(function.returnType.text);
+            const auto paramType = function.params.empty() ? std::string{} : normalized(function.params.front().type.text);
+            const bool retOk = (retType == "bool:1" || retType == "boolofwidthbit1");
+            const bool paramOk = (paramType == "char:8[]" || paramType == "charofwidthbit8[]");
+            if (!function.returnable || !retOk || function.params.size() != 1 || !paramOk) {
                 diagnostics.error(
                     "sema",
                     "bad-approval-signature",
                     function.location,
-                    "approval functions must return bool:1 and take one char:8[] parameter");
+                    "approval functions must return bool of width bit1 and take one char of width bit8[] parameter");
                 ok = false;
             }
         }
@@ -1741,6 +2155,52 @@ bool checkProgramSemantics(const Program& program, Diagnostics& diagnostics) {
                         "struct '" + structure.name + "' must implement method '" + std::string(required) + "'");
                     ok = false;
                 }
+            }
+        }
+    }
+
+    // === 标准库与 FFI 复杂化：description 子句 + apply 14 段 + std namespace 校验 ===
+    // 仅当 require std 启用时，强制 description 子句存在性检查，避免误伤现有 fixture。
+    // 但 std::xxx 调用的 namespace 校验不论 require std 是否启用都要做：缺 require std 时报
+    // std-not-required，有 require std 但缺 from namespace std 时报 std-namespace-required。
+    std::fprintf(stdout, "DEBUG: program.functions.size=%zu, structs.size=%zu, requireStd=%d\n",
+        program.functions.size(), program.structs.size(), static_cast<int>(program.requireStd));
+    std::fflush(stdout);
+    for (const auto& function : program.functions) {
+        std::fprintf(stdout, "DEBUG: function=%s, body.size=%zu\n", function.name.c_str(), function.body.size());
+        std::fflush(stdout);
+        ok = checkApplyAndStdNamespaceInBody(function.body, program.requireStd, diagnostics) && ok;
+    }
+    for (const auto& structure : program.structs) {
+        std::fprintf(stdout, "DEBUG: struct=%s, methods.size=%zu\n", structure.name.c_str(), structure.methods.size());
+        std::fflush(stdout);
+        for (const auto& method : structure.methods) {
+            ok = checkApplyAndStdNamespaceInBody(method.body, program.requireStd, diagnostics) && ok;
+        }
+    }
+    if (program.requireStd) {
+        for (const auto& function : program.functions) {
+            ok = checkFunctionDescriptions(function, diagnostics) && ok;
+            ok = checkParamDescriptions(function, diagnostics) && ok;
+            ok = checkVarDescriptionsInBody(function.body, diagnostics) && ok;
+            ok = checkApplyAndStdNamespaceInBody(function.body, true, diagnostics) && ok;
+        }
+        for (const auto& structure : program.structs) {
+            ok = checkStructDescriptions(structure, diagnostics) && ok;
+            for (const auto& field : structure.fields) {
+                if (field.descriptions.empty()) {
+                    diagnostics.error(
+                        "sema",
+                        "field-missing-variabledescription",
+                        field.location,
+                        "field '" + field.name + "' must declare a variabledescription clause");
+                    ok = false;
+                }
+            }
+            for (const auto& method : structure.methods) {
+                ok = checkFunctionDescriptions(method, diagnostics) && ok;
+                ok = checkParamDescriptions(method, diagnostics) && ok;
+                ok = checkVarDescriptionsInBody(method.body, diagnostics) && ok;
             }
         }
     }

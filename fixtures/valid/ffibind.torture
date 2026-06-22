@@ -1,0 +1,15 @@
+require ecc;
+require std;
+stddecl literal "ffi demo" because literal "demonstrate ffi binding";
+
+external arch x64 sys linux lib "/usr/lib/libdemo.so" symbol add as addbinding signature sha512 "A" "f29a396aede83e52df63b27609a99240e52b65cc4754af36021be27c2eb81c86bd6dcb60226d7c9ef1407f48f56e13ba6364b039a71ce51c838eb3aa7e033208" "61d77cdf5f3144414c40c9e4e011268fac92661aefb7452161b327fede6e89c8fd0c30525242ad6b7a111c0f2a64d5105c5b09895a4603db91ec07d9feb05454" declaredescription literal "bind c add" because literal "ffi binding for c add" ;
+
+function public callable void usefunc() code size 256 max stack size 128 requires security level 1 allowed roles user declaredescription literal "use c add" because literal "call c add via ffi"; returndescription literal "void" because literal "no return"; parameterdescription literal "x" because literal "first operand"; parameterdescription literal "y" because literal "second operand"; {
+    proceed verifyfunctionidentity();
+    proceed apply external addbinding at security level 1 with memory limit 64 with timeout 1000 with justification "call c add" with arguments { value by value = literal "1", value by value = literal "2" } with from namespace std discarding return predictstackdepth 2 with authority chain user with approval of alwaysapprove with approval justification "approve ffi call" with approval timeout 500 with architecture x64 with system linux with library path "/usr/lib/libdemo.so" with symbol add;
+}
+
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin declaredescription literal "main" because literal "entry"; returndescription literal "void" because literal "void main"; {
+    proceed verifyfunctionidentity();
+    proceed authorize invocation of usefunc at security level 1 with memory limit 32 with timeout 500 with justification "call usefunc" with arguments { } discarding return predictstackdepth 2 with authority chain user with approval of alwaysapprove with approval justification "approve call" with approval timeout 250;
+}

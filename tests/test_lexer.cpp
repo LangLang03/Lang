@@ -67,3 +67,35 @@ TEST_CASE("lexer accepts UTF-8 string literals", "[lexer][utf8]") {
     }
     CHECK(found);
 }
+
+TEST_CASE("lexer recognizes std/ffi/widthliteral/description keywords", "[lexer][std][ffi]") {
+    // 全部新增 std/FFI/位宽/描述子句族关键字都应被识别为关键字。
+    for (const char* keyword : {
+        "std", "external", "apply", "arch", "sys", "lib", "symbol", "as", "signature", "sha512",
+        "bit8", "bit16", "bit32", "bit64", "bit128",
+        "of", "width", "from", "namespace",
+        "declaredescription", "parameterdescription", "returndescription",
+        "variabledescription", "typedefinitiondescription", "literaldescription",
+        "stddecl", "stdbinding", "stdpurposestatement", "stdinfrastructurenote",
+        // 11 archid
+        "x86", "x64", "arm32", "arm64", "riscv32", "riscv64", "mips32", "mips64",
+        "sparc32", "sparc64", "powerpc64",
+        // 7 sysid
+        "linux", "windows", "macos", "android", "freebsd", "openbsd", "uefi",
+    }) {
+        CHECK(torture::compiler::isKeyword(keyword));
+    }
+}
+
+TEST_CASE("lexer still treats ordinary identifiers as non-keywords", "[lexer][std][ffi]") {
+    CHECK_FALSE(torture::compiler::isKeyword("add"));
+    CHECK_FALSE(torture::compiler::isKeyword("bindname"));
+    CHECK_FALSE(torture::compiler::isKeyword("studentname"));
+}
+
+TEST_CASE("lexer accepts bit32 keyword without colliding with int", "[lexer][widthliteral]") {
+    // 位宽关键字单独存在，且与 int 不冲突。
+    CHECK(torture::compiler::isKeyword("bit32"));
+    CHECK(torture::compiler::isKeyword("int"));
+    CHECK(torture::compiler::isKeyword("uint"));
+}

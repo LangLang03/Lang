@@ -18,11 +18,28 @@ public:
 
     std::optional<Program> parseProgram() {
         Program program;
-        if (match("require")) {
-            if (!expect("ecc", "expected ecc after require") || !expect(";", "expected ; after require ecc")) {
-                return std::nullopt;
+        while (match("require")) {
+            if (match("ecc")) {
+                if (!expect(";", "expected ; after require ecc")) {
+                    return std::nullopt;
+                }
+                program.requireEcc = true;
+                continue;
             }
-            program.requireEcc = true;
+            if (match("std")) {
+                if (!expect(";", "expected ; after require std")) {
+                    return std::nullopt;
+                }
+                auto import = parseStdImport();
+                if (!import) {
+                    return std::nullopt;
+                }
+                program.stdImport = std::move(*import);
+                program.requireStd = true;
+                continue;
+            }
+            error(current(), "expected-ecc-or-std", "expected ecc or std after require");
+            return std::nullopt;
         }
 
         while (!atEnd()) {
@@ -50,7 +67,15 @@ public:
                 program.structs.push_back(std::move(*classDecl));
                 continue;
             }
-            error(current(), "unexpected-top-level", "expected function, struct, or class declaration");
+            if (check("external")) {
+                auto ext = parseExternalDecl();
+                if (!ext) {
+                    return std::nullopt;
+                }
+                program.externalDecls.push_back(std::move(*ext));
+                continue;
+            }
+            error(current(), "unexpected-top-level", "expected function, struct, class, or external declaration");
             return std::nullopt;
         }
 
@@ -172,14 +197,62 @@ private:
             return std::nullopt;
         }
 
+        // 专用处理：`int of width bitN` / `uint of width bitN` / 等 4-token 序列。
+        // 提前匹配以避免在主循环中陷入死循环或误吞后续 token。
+        if (current().kind == TokenKind::Keyword) {
+            const std::string base = current().text;
+            if ((base == "int" || base == "uint" || base == "float" || base == "char" || base == "bool") &&
+                position_ + 3 < tokens_.size() &&
+                tokens_[position_ + 1].text == "of" &&
+                tokens_[position_ + 2].text == "width" &&
+                (tokens_[position_ + 3].text == "bit1" || tokens_[position_ + 3].text == "bit8" ||
+                 tokens_[position_ + 3].text == "bit16" || tokens_[position_ + 3].text == "bit32" ||
+                 tokens_[position_ + 3].text == "bit64" || tokens_[position_ + 3].text == "bit128")) {
+                TypeName result;
+                result.text = base + " of width " + tokens_[position_ + 3].text;
+                const auto bitText = tokens_[position_ + 3].text;
+                int bits = 0;
+                if (bitText == "bit1") bits = 1;
+                else if (bitText == "bit8") bits = 8;
+                else if (bitText == "bit16") bits = 16;
+                else if (bitText == "bit32") bits = 32;
+                else if (bitText == "bit64") bits = 64;
+                else if (bitText == "bit128") bits = 128;
+                result.widthBit = bits;
+                result.widthLiteralText = bitText;
+                position_ += 4;
+                // 新写法后还可接 `[]` 表示数组类型。
+                if (!atEnd() && current().text == "[") {
+                    ++position_;
+                    if (!expect("]", "expected ] in array type")) {
+                        return std::nullopt;
+                    }
+                    result.text += "[]";
+                }
+                return result;
+            }
+        }
+
         std::ostringstream out;
         int angleDepth = 0;
         bool consumedFirst = false;
+        TypeName result;
+
+        const bool isBuiltinScalar = current().text == "int" || current().text == "uint" ||
+            current().text == "float" || current().text == "char" || current().text == "bool";
+        const std::string firstText = current().text;
+
         while (!atEnd()) {
             const auto text = current().text;
             if (consumedFirst && angleDepth == 0) {
                 if (current().kind == TokenKind::Identifier || text == "," || text == ")" || text == "{" || text == "=" ||
                     text == ";" || text == "code" || text == "requires" || text == "allowed" || text == "where") {
+                    break;
+                }
+                // 新写法 `int of width bitN`：builtin scalar 后续允许 `of` 继续。
+                if (isBuiltinScalar && text == "of") {
+                    // 允许继续循环。
+                } else if (text == "of") {
                     break;
                 }
             }
@@ -198,9 +271,45 @@ private:
                     out << ' ';
                 }
             }
+            // 旧写法：`int:32`，把 legacy 标记置位，sema 阶段会拒绝。
+            // 在 out 即将接受 `:` 之后紧跟数字时设置标志。
+            if (isBuiltinScalar && !result.legacyWidthNotation && out.str() == firstText && text == ":" &&
+                position_ + 1 < tokens_.size() &&
+                (tokens_[position_ + 1].text == "8" || tokens_[position_ + 1].text == "16" ||
+                 tokens_[position_ + 1].text == "32" || tokens_[position_ + 1].text == "64" ||
+                 tokens_[position_ + 1].text == "1")) {
+                result.legacyWidthNotation = true;
+            }
+
             out << text;
             ++position_;
             consumedFirst = true;
+
+            // 新写法：`int of width bitN`，在读完 `int of width` 后吃掉 `bitN`。
+            if (isBuiltinScalar && out.str() == firstText + " of width" &&
+                (text == "bit8" || text == "bit16" || text == "bit32" || text == "bit64" || text == "bit128")) {
+                result.widthLiteralText = text;
+                int bits = 0;
+                if (text == "bit8") {
+                    bits = 8;
+                } else if (text == "bit16") {
+                    bits = 16;
+                } else if (text == "bit32") {
+                    bits = 32;
+                } else if (text == "bit64") {
+                    bits = 64;
+                } else if (text == "bit128") {
+                    bits = 128;
+                }
+                result.widthBit = bits;
+                break;
+            }
+
+            // 旧写法：`int:32`，把 legacy 标记置位，sema 阶段会拒绝。
+            if (isBuiltinScalar && out.str() == firstText + ":" &&
+                (text == "8" || text == "16" || text == "32" || text == "64" || text == "1")) {
+                result.legacyWidthNotation = true;
+            }
 
             if (angleDepth <= 0 && (text == "void" || text == "chain")) {
                 break;
@@ -227,7 +336,8 @@ private:
             }
         }
 
-        return TypeName{out.str()};
+        result.text = out.str();
+        return result;
     }
 
     std::optional<FunctionDecl> parseFunction(bool method) {
@@ -321,6 +431,14 @@ private:
             return std::nullopt;
         }
         param.name = name->text;
+        // 收集 parameterdescription 子句，可选多条，以 `;` 收尾。
+        while (check("parameterdescription")) {
+            auto desc = parseDescriptionClause(DescriptionKind::Parameter, "parameter");
+            if (!desc) {
+                return std::nullopt;
+            }
+            param.descriptions.push_back(std::move(*desc));
+        }
         return param;
     }
 
@@ -400,6 +518,30 @@ private:
                 } while (match(","));
                 continue;
             }
+            if (check("declaredescription")) {
+                auto desc = parseDescriptionClause(DescriptionKind::Declaration, "function");
+                if (!desc) {
+                    return false;
+                }
+                function.descriptions.push_back(std::move(*desc));
+                continue;
+            }
+            if (check("returndescription")) {
+                auto desc = parseDescriptionClause(DescriptionKind::Return, "function return");
+                if (!desc) {
+                    return false;
+                }
+                function.descriptions.push_back(std::move(*desc));
+                continue;
+            }
+            if (check("parameterdescription")) {
+                auto desc = parseDescriptionClause(DescriptionKind::Parameter, "function parameter");
+                if (!desc) {
+                    return false;
+                }
+                function.descriptions.push_back(std::move(*desc));
+                continue;
+            }
             error(current(), "unexpected-function-clause", "unexpected token in function header");
             return false;
         }
@@ -451,6 +593,29 @@ private:
             statement = parseVerify();
         } else if (check("authorize")) {
             statement = parseAuthorizeCall();
+        } else if (check("apply")) {
+            // apply 单独走流程：返回 Statement::AuthorizeCall 占位（语义阶段进一步处理）。
+            // 这里不直接挂到 statement->authorizeCall，因为 apply 走的是 FFI 路径。
+            // 简化处理：把 apply 的元信息塞进 AuthorizeCall 与 statement->apply，target 写 `apply.<bindname>`。
+            auto applyOpt = parseApplyStatement();
+            if (!applyOpt) {
+                return nullptr;
+            }
+            statement = makeStatement(StatementKind::AuthorizeCall, start);
+            statement->authorizeCall.location = start;
+            statement->authorizeCall.target = "apply." + applyOpt->bindName;
+            statement->authorizeCall.securityLevel = applyOpt->securityLevel;
+            statement->authorizeCall.memoryLimit = applyOpt->memoryLimit;
+            statement->authorizeCall.timeout = applyOpt->timeout;
+            statement->authorizeCall.predictStackDepth = applyOpt->predictStackDepth;
+            statement->authorizeCall.approvalTimeout = applyOpt->approvalTimeout;
+            statement->authorizeCall.authorityChain = applyOpt->authorityChain;
+            statement->authorizeCall.approvalFunction = applyOpt->approvalFunction;
+            statement->authorizeCall.io = std::move(applyOpt->io);
+            statement->authorizeCall.discardingReturn = applyOpt->discardingReturn;
+            statement->authorizeCall.arguments = std::move(applyOpt->arguments);
+            // 把 14 段手续完整存入 statement->apply 以便 sema/VM 校验。
+            statement->apply = std::move(*applyOpt);
         } else if (check("prove")) {
             statement = parseProof();
         } else if (check("operatorinput")) {
@@ -563,6 +728,14 @@ private:
             return nullptr;
         }
         statement->varDecl.name = name->text;
+        // 收集 variabledescription 子句。
+        while (check("variabledescription")) {
+            auto desc = parseDescriptionClause(DescriptionKind::Variable, "variable");
+            if (!desc) {
+                return nullptr;
+            }
+            statement->varDecl.descriptions.push_back(std::move(*desc));
+        }
         if (check("{")) {
             if (!validateEventBlockAndSkip()) {
                 return nullptr;
@@ -798,6 +971,18 @@ private:
                     statement.authorizeCall.authorityChain = chain->text;
                     continue;
                 }
+                if (match("from")) {
+                    // `with from namespace <name>`：std 调用必须显式带 `from namespace std`。
+                    if (!expect("namespace", "expected namespace after with from")) {
+                        return false;
+                    }
+                    auto ns = expectIdentifier("expected namespace name after from namespace");
+                    if (!ns) {
+                        return false;
+                    }
+                    statement.authorizeCall.fromNamespace = ns->text;
+                    continue;
+                }
                 if (match("approval")) {
                     if (match("of")) {
                         auto approval = parseQualifiedName();
@@ -930,13 +1115,29 @@ private:
             return std::nullopt;
         }
         std::string name = first->text;
-        while (match(".")) {
-            auto part = expectIdentifier("expected name after .");
-            if (!part) {
-                return std::nullopt;
+        while (true) {
+            // `::` 用于 std namespace 调用：`std::io_stdout_write_line` 形式。
+            if (!atEnd() && current().text == ":" && position_ + 1 < tokens_.size() && tokens_[position_ + 1].text == ":") {
+                ++position_;
+                ++position_;
+                auto part = expectIdentifier("expected name after ::");
+                if (!part) {
+                    return std::nullopt;
+                }
+                name += "::";
+                name += part->text;
+                continue;
             }
-            name += ".";
-            name += part->text;
+            if (match(".")) {
+                auto part = expectIdentifier("expected name after .");
+                if (!part) {
+                    return std::nullopt;
+                }
+                name += ".";
+                name += part->text;
+                continue;
+            }
+            break;
         }
         return name;
     }
@@ -1692,6 +1893,14 @@ private:
         if (!parseImplementBlock(structure)) {
             return std::nullopt;
         }
+        // 收集 typedefinitiondescription 子句。
+        while (check("typedefinitiondescription")) {
+            auto desc = parseDescriptionClause(DescriptionKind::TypeDefinition, "struct");
+            if (!desc) {
+                return std::nullopt;
+            }
+            structure.descriptions.push_back(std::move(*desc));
+        }
         return structure;
     }
 
@@ -1766,6 +1975,14 @@ private:
         }
         if (!parseImplementBlock(classDecl)) {
             return std::nullopt;
+        }
+        // 收集 typedefinitiondescription 子句。
+        while (check("typedefinitiondescription")) {
+            auto desc = parseDescriptionClause(DescriptionKind::TypeDefinition, "class");
+            if (!desc) {
+                return std::nullopt;
+            }
+            classDecl.descriptions.push_back(std::move(*desc));
         }
         return classDecl;
     }
@@ -1864,6 +2081,403 @@ private:
             }
             ++position_;
         }
+    }
+
+    // === 标准库与 FFI 复杂化新增解析辅助 ===
+
+    // 解析 `declaredescription literal "..." because literal "...";` 一类的描述子句。
+    std::optional<DescriptionClause> parseDescriptionClause(DescriptionKind kind, std::string_view owner) {
+        DescriptionClause clause;
+        clause.kind = kind;
+        clause.location = current().location;
+        // 消费描述子句关键字（declaredescription / parameterdescription / ...）。
+        ++position_;
+        if (!expect("literal", std::string(owner) + " description body")) {
+            return std::nullopt;
+        }
+        if (current().kind != TokenKind::String) {
+            error(current(), "expected-description-string", std::string(owner) + " description must be a string");
+            return std::nullopt;
+        }
+        clause.text = current().text;
+        ++position_;
+        clause.reason = parseBecauseLiteral(owner);
+        if (!clause.reason) {
+            return std::nullopt;
+        }
+        if (!expect(";", "expected ; after description clause")) {
+            return std::nullopt;
+        }
+        return clause;
+    }
+
+    // 解析 `stddecl "..." because literal "...";` / `stdbinding` / `stdpurposestatement` / `stdinfrastructurenote`。
+    std::optional<MetaNote> parseMetaNote() {
+        MetaNote note;
+        note.location = current().location;
+        const std::string keyword = current().text;
+        if (keyword == "stddecl") {
+            note.kind = MetaNoteKind::StdDecl;
+        } else if (keyword == "stdbinding") {
+            note.kind = MetaNoteKind::StdBinding;
+        } else if (keyword == "stdpurposestatement") {
+            note.kind = MetaNoteKind::StdPurposeStatement;
+        } else if (keyword == "stdinfrastructurenote") {
+            note.kind = MetaNoteKind::StdInfrastructureNote;
+        } else {
+            error(current(), "expected-meta-note", "expected stddecl, stdbinding, stdpurposestatement, or stdinfrastructurenote");
+            return std::nullopt;
+        }
+        ++position_;
+        if (!expect("literal", "expected literal after meta note")) {
+            return std::nullopt;
+        }
+        if (current().kind != TokenKind::String) {
+            error(current(), "expected-meta-note-string", "expected string after meta note literal");
+            return std::nullopt;
+        }
+        note.text = current().text;
+        ++position_;
+        note.reason = parseBecauseLiteral("std meta note");
+        if (!note.reason) {
+            return std::nullopt;
+        }
+        if (!expect(";", "expected ; after meta note")) {
+            return std::nullopt;
+        }
+        return note;
+    }
+
+    std::optional<StdImport> parseStdImport() {
+        StdImport import;
+        import.location = current().location;
+        // 必须以 stddecl 起头。
+        if (!match("stddecl")) {
+            error(current(), "std-missing-meta-decl", "first clause after require std must be stddecl");
+            return std::nullopt;
+        }
+        // 我们已经消费 stddecl，回退 position 一下让 parseMetaNote 处理。
+        --position_;
+        if (current().text != "stddecl") {
+            error(current(), "std-missing-meta-decl", "stddecl expected");
+            return std::nullopt;
+        }
+        auto first = parseMetaNote();
+        if (!first) {
+            return std::nullopt;
+        }
+        import.notes.push_back(std::move(*first));
+        // 后续可选追加 stdbinding / stdpurposestatement / stdinfrastructurenote。
+        while (check("stdbinding") || check("stdpurposestatement") || check("stdinfrastructurenote")) {
+            auto extra = parseMetaNote();
+            if (!extra) {
+                return std::nullopt;
+            }
+            import.notes.push_back(std::move(*extra));
+        }
+        return import;
+    }
+
+    std::optional<ExternalDecl> parseExternalDecl() {
+        ExternalDecl decl;
+        decl.location = current().location;
+        if (!expect("external", "expected external")) {
+            return std::nullopt;
+        }
+        // 段 1：arch
+        if (!expect("arch", "expected arch segment in external declaration")) {
+            return std::nullopt;
+        }
+        auto arch = expectIdentifier("expected architecture id");
+        if (!arch) {
+            return std::nullopt;
+        }
+        decl.arch = arch->text;
+        // 段 2：sys
+        if (!expect("sys", "expected sys segment in external declaration")) {
+            return std::nullopt;
+        }
+        auto sys = expectIdentifier("expected system id");
+        if (!sys) {
+            return std::nullopt;
+        }
+        decl.sys = sys->text;
+        // 段 3：lib <abspath>
+        if (!expect("lib", "expected lib segment in external declaration")) {
+            return std::nullopt;
+        }
+        if (current().kind != TokenKind::String) {
+            error(current(), "ffi-library-path-must-be-string", "lib path must be a string");
+            return std::nullopt;
+        }
+        decl.libPath = current().text;
+        ++position_;
+        // 段 4：symbol
+        if (!expect("symbol", "expected symbol segment in external declaration")) {
+            return std::nullopt;
+        }
+        auto sym = expectIdentifier("expected C symbol name");
+        if (!sym) {
+            return std::nullopt;
+        }
+        decl.symbol = sym->text;
+        // 段 5：as <bindname>
+        if (!expect("as", "expected as segment in external declaration")) {
+            return std::nullopt;
+        }
+        auto bind = expectIdentifier("expected binding name");
+        if (!bind) {
+            return std::nullopt;
+        }
+        decl.bindName = bind->text;
+        // 段 6：signature sha512 <seg1> <seg2> <seg3>
+        if (!expect("signature", "expected signature segment in external declaration")) {
+            return std::nullopt;
+        }
+        if (!expect("sha512", "expected sha512 keyword in signature segment")) {
+            return std::nullopt;
+        }
+        for (int i = 0; i < 3; ++i) {
+            if (current().kind != TokenKind::String) {
+                error(current(), "ffi-sha512-segment-must-be-string", "sha512 segments must be strings");
+                return std::nullopt;
+            }
+            decl.sha512Chain.push_back(current().text);
+            ++position_;
+        }
+        // 段 7：declaredescription ... because literal ...
+        auto desc = parseDescriptionClause(DescriptionKind::Declaration, "external");
+        if (!desc) {
+            return std::nullopt;
+        }
+        decl.description = std::move(*desc);
+        return decl;
+    }
+
+    // 解析 `apply external <bindname> ...` 14 段必填手续。
+    std::optional<ApplyStatement> parseApplyStatement() {
+        ApplyStatement stmt;
+        stmt.location = current().location;
+        if (!expect("apply", "expected apply")) {
+            return std::nullopt;
+        }
+        if (!expect("external", "expected external after apply")) {
+            return std::nullopt;
+        }
+        auto bind = expectIdentifier("expected binding name after apply external");
+        if (!bind) {
+            return std::nullopt;
+        }
+        stmt.bindName = bind->text;
+
+        // 段 2：at security level N
+        if (!expect("at", "expected at clause") || !expect("security", "expected security after at") ||
+            !expect("level", "expected level after security")) {
+            return std::nullopt;
+        }
+        stmt.securityLevel = parseRequiredNumber("expected security level");
+
+        // 段 3：with memory limit M
+        if (!expect("with", "expected with after security level") || !expect("memory", "expected memory after with") ||
+            !expect("limit", "expected limit after memory")) {
+            return std::nullopt;
+        }
+        stmt.memoryLimit = parseRequiredNumber("expected memory limit");
+
+        // 段 4：with timeout T
+        if (!expect("with", "expected with before timeout") || !expect("timeout", "expected timeout")) {
+            return std::nullopt;
+        }
+        stmt.timeout = parseRequiredNumber("expected timeout milliseconds");
+
+        // 段 5：with io operation because literal "..."（可省略）
+        if (check("with") && position_ + 1 < tokens_.size() && tokens_[position_ + 1].text == "io") {
+            match("with");
+            if (!parseIoClause(stmt.io)) {
+                return std::nullopt;
+            }
+        }
+
+        // 段 6：with justification "..."
+        if (!expect("with", "expected with before justification") || !expect("justification", "expected justification")) {
+            return std::nullopt;
+        }
+        if (current().kind != TokenKind::String) {
+            error(current(), "expected-justification-string", "justification must be a string");
+            return std::nullopt;
+        }
+        auto justToken = current();
+        ++position_;
+        stmt.justification = makeExpr(ExprKind::String, justToken.location, justToken.text);
+        stmt.justification->declaredLiteral = true;
+
+        // 段 7：with arguments { ... }
+        if (!expect("with", "expected with before arguments") || !expect("arguments", "expected arguments")) {
+            return std::nullopt;
+        }
+        if (!expect("{", "expected { before arguments")) {
+            return std::nullopt;
+        }
+        if (!check("}")) {
+            do {
+                FunctionCallArg arg;
+                arg.location = current().location;
+                auto name = expectIdentifier("expected argument name");
+                if (!name) {
+                    return std::nullopt;
+                }
+                arg.name = name->text;
+                if (!expect("by", "expected by in argument")) {
+                    return std::nullopt;
+                }
+                if (match("reference")) {
+                    arg.byReference = true;
+                } else if (match("value")) {
+                    arg.byReference = false;
+                } else {
+                    error(current(), "expected-pass-mode", "expected value or reference");
+                    return std::nullopt;
+                }
+                if (!expect("=", "expected = in argument")) {
+                    return std::nullopt;
+                }
+                arg.value = parseExpression();
+                if (!arg.value) {
+                    return std::nullopt;
+                }
+                stmt.arguments.push_back(std::move(arg));
+            } while (match(","));
+        }
+        if (!expect("}", "expected } after arguments")) {
+            return std::nullopt;
+        }
+
+        // 段 7.5（可选）：with from namespace <name>，std 调用必须显式带。
+        if (check("with") && position_ + 1 < tokens_.size() && tokens_[position_ + 1].text == "from") {
+            match("with");
+            if (!expect("from", "expected from after with") || !expect("namespace", "expected namespace after with from")) {
+                return std::nullopt;
+            }
+            auto ns = expectIdentifier("expected namespace name after from namespace");
+            if (!ns) {
+                return std::nullopt;
+            }
+            stmt.fromNamespace = ns->text;
+        }
+
+        // 段 8：discarding return 或 receiving return into <var> 二选一
+        if (match("discarding")) {
+            if (!expect("return", "expected return after discarding")) {
+                return std::nullopt;
+            }
+            stmt.discardingReturn = true;
+        } else if (match("receiving")) {
+            if (!expect("return", "expected return after receiving") || !expect("into", "expected into after receiving return")) {
+                return std::nullopt;
+            }
+            auto into = expectIdentifier("expected target variable for receiving return");
+            if (!into) {
+                return std::nullopt;
+            }
+            stmt.receivingReturnInto = into->text;
+        } else {
+            error(current(), "apply-missing-return-clause", "apply statement must contain discarding return or receiving return into");
+            return std::nullopt;
+        }
+
+        // 段 9：predictstackdepth P
+        if (!expect("predictstackdepth", "expected predictstackdepth clause")) {
+            return std::nullopt;
+        }
+        stmt.predictStackDepth = parseRequiredNumber("expected predicted stack depth");
+
+        // 段 10：with authority chain <role>
+        if (!expect("with", "expected with before authority") || !expect("authority", "expected authority") ||
+            !expect("chain", "expected chain after authority")) {
+            return std::nullopt;
+        }
+        auto chain = expectIdentifier("expected authority chain identifier");
+        if (!chain) {
+            return std::nullopt;
+        }
+        stmt.authorityChain = chain->text;
+
+        // 段 11：with approval of <approverfn>
+        if (!expect("with", "expected with before approval") || !expect("approval", "expected approval") ||
+            !expect("of", "expected of after approval")) {
+            return std::nullopt;
+        }
+        auto approver = parseQualifiedName();
+        if (!approver) {
+            return std::nullopt;
+        }
+        stmt.approvalFunction = *approver;
+
+        // 段 12：with approval justification "..."
+        if (!expect("with", "expected with before approval justification") ||
+            !expect("approval", "expected approval before justification") ||
+            !expect("justification", "expected justification after approval")) {
+            return std::nullopt;
+        }
+        if (current().kind != TokenKind::String) {
+            error(current(), "expected-approval-justification", "approval justification must be a string");
+            return std::nullopt;
+        }
+        auto apToken = current();
+        ++position_;
+        stmt.approvalJustification = makeExpr(ExprKind::String, apToken.location, apToken.text);
+        stmt.approvalJustification->declaredLiteral = true;
+
+        // 段 13：with approval timeout K
+        if (!expect("with", "expected with before approval timeout") ||
+            !expect("approval", "expected approval before timeout") || !expect("timeout", "expected timeout after approval")) {
+            return std::nullopt;
+        }
+        stmt.approvalTimeout = parseRequiredNumber("expected approval timeout milliseconds");
+
+        // 段 14：with architecture ... with system ... with library path ... with symbol ...
+        if (!expect("with", "expected with before architecture") || !expect("architecture", "expected architecture")) {
+            return std::nullopt;
+        }
+        auto arch = expectIdentifier("expected architecture id in apply restatement");
+        if (!arch) {
+            return std::nullopt;
+        }
+        stmt.architecture = arch->text;
+
+        if (!expect("with", "expected with before system") || !expect("system", "expected system")) {
+            return std::nullopt;
+        }
+        auto sys = expectIdentifier("expected system id in apply restatement");
+        if (!sys) {
+            return std::nullopt;
+        }
+        stmt.system = sys->text;
+
+        if (!expect("with", "expected with before library") || !expect("library", "expected library") ||
+            !expect("path", "expected path after library")) {
+            return std::nullopt;
+        }
+        if (current().kind != TokenKind::String) {
+            error(current(), "ffi-library-path-must-be-string", "library path must be a string");
+            return std::nullopt;
+        }
+        stmt.libraryPath = current().text;
+        ++position_;
+
+        if (!expect("with", "expected with before symbol") || !expect("symbol", "expected symbol")) {
+            return std::nullopt;
+        }
+        auto sym = expectIdentifier("expected C symbol name in apply restatement");
+        if (!sym) {
+            return std::nullopt;
+        }
+        stmt.symbol = sym->text;
+
+        if (!expect(";", "expected ; after apply statement")) {
+            return std::nullopt;
+        }
+        return stmt;
     }
 
     std::span<const Token> tokens_;

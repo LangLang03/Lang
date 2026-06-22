@@ -26,7 +26,19 @@ const std::unordered_set<std::string>& keywords() {
         "setproperty", "signature", "size", "stack", "storage", "struct", "synchronized", "than", "theorem", "therefore", "thread",
         "strategy", "timeout", "to", "trace", "trap", "tribunal", "true", "trustee", "type", "uint", "uncallable", "unseal",
         "until", "use", "value", "verifyfunctionidentity", "verifymemoryintegrity", "via", "void", "volatile",
-        "where", "while", "wire", "with", "wrap", "writable", "xor", "yield", "yieldgate",
+        "where", "while", "width", "wire", "with", "wrap", "writable", "xor", "yield", "yieldgate",
+        // 标准库与 FFI 复杂化新增关键字
+        "std", "external", "apply", "arch", "sys", "lib", "symbol", "as", "sha512",
+        "bit8", "bit16", "bit32", "bit64", "bit128",
+        "namespace", "receiving",
+        "declaredescription", "parameterdescription", "returndescription",
+        "variabledescription", "typedefinitiondescription", "literaldescription",
+        "stddecl", "stdbinding", "stdpurposestatement", "stdinfrastructurenote",
+        // 体系结构 ID
+        "x86", "x64", "arm32", "arm64", "riscv32", "riscv64", "mips32", "mips64",
+        "sparc32", "sparc64", "powerpc64",
+        // 操作系统 ID
+        "linux", "windows", "macos", "android", "freebsd", "openbsd", "uefi",
     };
     return value;
 }

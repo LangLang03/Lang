@@ -88,6 +88,9 @@ std::string environmentSummary() {
     out << "pointer-bytes=" << sizeof(void*) << '\n';
     out << "size-bytes=" << sizeof(std::size_t) << '\n';
     out << "endian=" << endianName() << '\n';
+    // std/FFI 元信息：版本指纹 v1。该字符串会进入环境指纹，使得任何修改 std/FFI 行为
+    // 的提交都会让已编译的字节码被环境检查拒绝。
+    out << "std-ffi-magic=TortureLang/std-ffi-binding/v1\n";
     out << compilerMacroSummary();
     return out.str();
 }

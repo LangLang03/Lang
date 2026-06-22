@@ -79,6 +79,7 @@ enum class Opcode : std::uint16_t {
   kOperatorInput = platform_bytecode::kOpcodeOperatorInput,
   kReturn = platform_bytecode::kOpcodeReturn,
   kHalt = platform_bytecode::kOpcodeHalt,
+  kApply = platform_bytecode::kOpcodeApply,
 };
 
 struct Instruction {

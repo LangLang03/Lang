@@ -79,13 +79,14 @@ struct OpcodeEntry {
     X(kLocalOpcodeRole,              "ROLE") \
     X(kLocalOpcodeOperatorInput,     "OPINPUT") \
     X(kLocalOpcodeReturn,            "RET") \
-    X(kLocalOpcodeHalt,              "HALT")
+    X(kLocalOpcodeHalt,              "HALT") \
+    X(kLocalOpcodeApply,             "APPLY")
 
 #define TORTURE_MK_ENTRY(local_id, base_name) \
     { static_cast<std::uint16_t>((static_cast<std::uint16_t>(TORTURE_PLATFORM_ID) << 8) | (local_id)), \
       base_name "_" TORTURE_PLATFORM_SUFFIX_LITERAL },
 
-constexpr std::array<OpcodeEntry, 66> kPlatformTable = {{
+constexpr std::array<OpcodeEntry, 67> kPlatformTable = {{
     TORTURE_OPCODES(TORTURE_MK_ENTRY)
 }};
 

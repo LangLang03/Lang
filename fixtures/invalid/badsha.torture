@@ -1,0 +1,7 @@
+require ecc;
+require std;
+stddecl literal "bad sha" because literal "deliberately break the sha512 chain";
+external arch x64 sys linux lib "/usr/lib/libdemo.so" symbol add as addbinding signature sha512 "A" "deadbeef" "f29a396aede83e52df63b27609a99240e52b65cc4754af36021be27c2eb81c86bd6dcb60226d7c9ef1407f48f56e13ba6364b039a71ce51c838eb3aa7e033208" declaredescription literal "bind c add" because literal "ffi binding for c add" ;
+function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin declaredescription literal "main" because literal "entry"; returndescription literal "void" because literal "void main"; {
+    proceed verifyfunctionidentity();
+}

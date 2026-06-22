@@ -74,6 +74,7 @@ add_library(torture_common
     src/common/diagnostic.cpp
     src/common/source.cpp
     src/common/sha256.cpp
+    src/common/sha512.cpp
 )
 target_include_directories(torture_common PUBLIC src)
 

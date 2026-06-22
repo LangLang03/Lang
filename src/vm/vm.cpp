@@ -2,9 +2,12 @@
 #include "vm/memory.h"
 #include "vm/value.h"
 
+#include "common/sha512.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <istream>
 #include <ostream>
 #include <stdexcept>
@@ -490,6 +493,97 @@ Value Interpreter::execute(const FunctionBytecode& function, const std::vector<V
         }
         case Opcode::kHalt: {
             return integerValue(0);
+        }
+        case Opcode::kApply: {
+            // FFI `apply external <bindname>` 运行期校验：arch/sys、lib 路径、SHA-512 链。
+            // 指令参数顺序（与 bytecode_compiler 严格对应）：
+            //   0:bindname 1:arch 2:sys 3:libPath 4:symbol
+            //   5:receivingReturnInto 6:justification 7:approvalJustification 8:approvalTimeout
+            //   9:securityLevel 10:memoryLimit 11:timeout 12:predictStackDepth
+            //   13:authorityChain 14:approvalFunction 15:discardingReturn 16:fromNamespace
+            //   17:argumentCount
+            const auto& argsR = instruction.args;
+            const auto bindName = argsR.at(0);
+            const auto runtimeArch = argsR.at(1);
+            const auto runtimeSys = argsR.at(2);
+            const auto libPath = argsR.at(3);
+            const auto symbol = argsR.at(4);
+            (void)argsR.at(5);  // receivingReturnInto
+            (void)argsR.at(6);  // justification
+            (void)argsR.at(7);  // approvalJustification
+            (void)argsR.at(8);  // approvalTimeout
+            (void)argsR.at(9);  // securityLevel
+            (void)argsR.at(10); // memoryLimit
+            (void)argsR.at(11); // timeout
+            (void)argsR.at(12); // predictStackDepth
+            (void)argsR.at(13); // authorityChain
+            (void)argsR.at(14); // approvalFunction
+            (void)argsR.at(15); // discardingReturn
+            (void)argsR.at(16); // fromNamespace
+            const auto argCount = toSize(parseInteger(argsR.at(17)));
+            // 弹出参数（保持 LIFO 顺序）
+            for (std::size_t i = 0; i < argCount; ++i) {
+                (void)pop(stack);
+            }
+            // 1. 找到 binding
+            const BytecodeProgram::ExternalBinding* binding = nullptr;
+            for (const auto& b : program_.externalBindings) {
+                if (b.name == bindName) {
+                    binding = &b;
+                    break;
+                }
+            }
+            if (binding == nullptr) {
+                throw std::runtime_error("ffi-runtime-binding-missing: no external binding '" + bindName + "'");
+            }
+            // 2. arch/sys 与当前平台匹配
+            const std::string currentArch = std::string{kPlatformName}.substr(0, std::string{kPlatformName}.find('_'));
+            std::string currentSys = "unknown";
+            const auto pname = std::string{kPlatformName};
+            if (pname.starts_with("linux_")) currentSys = "linux";
+            else if (pname.starts_with("windows_")) currentSys = "windows";
+            else if (pname.starts_with("android_")) currentSys = "android";
+            else if (pname.starts_with("macos_")) currentSys = "macos";
+            else if (pname.starts_with("freebsd_")) currentSys = "freebsd";
+            else if (pname.starts_with("openbsd_")) currentSys = "openbsd";
+            else if (pname.starts_with("uefi_")) currentSys = "uefi";
+            if (binding->arch != currentArch) {
+                throw std::runtime_error("ffi-runtime-platform-mismatch: binding '" + bindName + "' declared arch '" + binding->arch + "' but running on arch '" + currentArch + "'");
+            }
+            if (binding->sys != currentSys) {
+                throw std::runtime_error("ffi-runtime-platform-mismatch: binding '" + bindName + "' declared sys '" + binding->sys + "' but running on sys '" + currentSys + "'");
+            }
+            if (runtimeArch != binding->arch || runtimeSys != binding->sys) {
+                throw std::runtime_error("ffi-runtime-platform-mismatch: apply call restated arch/sys do not match external declaration");
+            }
+            if (runtimeArch != currentArch) {
+                throw std::runtime_error("ffi-runtime-platform-mismatch: apply call arch '" + runtimeArch + "' does not match current platform arch '" + currentArch + "'");
+            }
+            if (runtimeSys != currentSys) {
+                throw std::runtime_error("ffi-runtime-platform-mismatch: apply call sys '" + runtimeSys + "' does not match current platform sys '" + currentSys + "'");
+            }
+            // 3. 重新计算 SHA-512 链
+            if (binding->sha512Chain.size() != 3) {
+                throw std::runtime_error("ffi-runtime-sha512-mismatch: binding '" + bindName + "' does not have a 3-segment sha512 chain");
+            }
+            const auto h1 = torture::common::sha512Hex(binding->sha512Chain[0]);
+            if (h1 != binding->sha512Chain[1]) {
+                throw std::runtime_error("ffi-runtime-sha512-mismatch: binding '" + bindName + "' sha512 chain broken at segment 2");
+            }
+            const auto h2 = torture::common::sha512Hex(binding->sha512Chain[1]);
+            if (h2 != binding->sha512Chain[2]) {
+                throw std::runtime_error("ffi-runtime-sha512-mismatch: binding '" + bindName + "' sha512 chain broken at segment 3");
+            }
+            // 4. 检查 lib 路径是绝对路径且文件存在
+            if (libPath.empty() || libPath.front() != '/') {
+                throw std::runtime_error("ffi-runtime-library-missing: apply call lib path '" + libPath + "' is not an absolute path");
+            }
+            if (!std::filesystem::exists(std::filesystem::path{libPath})) {
+                throw std::runtime_error("ffi-runtime-library-missing: library file '" + libPath + "' does not exist on disk");
+            }
+            (void)symbol;
+            ++pc;
+            break;
         }
 
         // ============== IO ==============

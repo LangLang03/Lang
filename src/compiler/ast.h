@@ -14,6 +14,12 @@ class AstVisitor;
 
 struct TypeName {
     std::string text;
+    // 新写法：`int of width bit32` 解析出的位宽数字。
+    std::optional<int> widthBit;
+    // 解析出的位宽关键字原名（如 `bit32`）。
+    std::optional<std::string> widthLiteralText;
+    // 是否按 `int:32` 旧写法解析（sema 校验时应拒绝）。
+    bool legacyWidthNotation = false;
 };
 
 struct Expr;
@@ -46,6 +52,8 @@ struct AuthorizeCall {
     int approvalTimeout = 0;
     std::string authorityChain;
     std::optional<std::string> approvalFunction;
+    // `from namespace <name>` 子句：std 调用必须显式带 `from namespace std`。
+    std::string fromNamespace;
     IoClause io;
     SourceLocation location;
 };
@@ -92,6 +100,84 @@ struct Expr {
 ExprPtr makeExpr(ExprKind kind, SourceLocation location, std::string text = {});
 ExprPtr cloneExpr(const Expr& expr);
 
+// 描述子句种类：declaredescription / parameterdescription / returndescription /
+// variabledescription / typedefinitiondescription / literaldescription。
+enum class DescriptionKind {
+    Declaration,
+    Parameter,
+    Return,
+    Variable,
+    TypeDefinition,
+    Literal,
+    // FFI 绑定专用的「declaredescription」同样视作 Declaration。
+};
+
+struct DescriptionClause {
+    DescriptionKind kind = DescriptionKind::Declaration;
+    std::string text;
+    ExprPtr reason;
+    SourceLocation location;
+};
+
+// std 引入中的元说明子句（stddecl / stdbinding / stdpurposestatement / stdinfrastructurenote）。
+enum class MetaNoteKind {
+    StdDecl,
+    StdBinding,
+    StdPurposeStatement,
+    StdInfrastructureNote,
+};
+
+struct MetaNote {
+    MetaNoteKind kind = MetaNoteKind::StdDecl;
+    std::string text;
+    ExprPtr reason;
+    SourceLocation location;
+};
+
+struct StdImport {
+    // 至少包含一条 stddecl 子句，可选追加 stdbinding / stdpurposestatement / stdinfrastructurenote。
+    std::vector<MetaNote> notes;
+    SourceLocation location;
+};
+
+// FFI 外部绑定。
+struct ExternalDecl {
+    std::string arch;
+    std::string sys;
+    std::string libPath;
+    std::string symbol;
+    std::string bindName;
+    // 三段 SHA-512：第 1 段是明文短串，第 2 段是 sha512(第 1 段)，第 3 段是 sha512(第 2 段)。
+    std::vector<std::string> sha512Chain;
+    DescriptionClause description;
+    SourceLocation location;
+};
+
+// FFI 调用入口 `apply external`。
+struct ApplyStatement {
+    std::string bindName;
+    int securityLevel = 0;
+    int memoryLimit = 0;
+    int timeout = 0;
+    int predictStackDepth = 0;
+    int approvalTimeout = 0;
+    std::string authorityChain;
+    std::optional<std::string> approvalFunction;
+    std::vector<FunctionCallArg> arguments;
+    IoClause io;
+    bool discardingReturn = false;
+    std::string receivingReturnInto;
+    std::string architecture;
+    std::string system;
+    std::string libraryPath;
+    std::string symbol;
+    ExprPtr justification;
+    ExprPtr approvalJustification;
+    // std 命名空间限定：必须显式带 `with from namespace std`。
+    std::string fromNamespace;
+    SourceLocation location;
+};
+
 struct VarDecl {
     bool immutable = false;
     std::string access;
@@ -101,6 +187,7 @@ struct VarDecl {
     TypeName type;
     std::string name;
     ExprPtr initializer;
+    std::vector<DescriptionClause> descriptions;
     SourceLocation location;
 
     void accept(AstVisitor& visitor) const;
@@ -206,6 +293,8 @@ struct Statement {
     ProofStmt proof;
     RoleStmt role;
     InstantiateStmt instantiate;
+    // FFI `apply external ...` 14 段手续的完整内容，sema/VM 阶段使用。
+    ApplyStatement apply;
     std::string identifier;
     JudgmentClause judgment;
     JudgmentClause elseJudgment;
@@ -222,6 +311,7 @@ struct Param {
     std::string access;
     TypeName type;
     std::string name;
+    std::vector<DescriptionClause> descriptions;
     SourceLocation location;
 };
 
@@ -247,6 +337,7 @@ struct FunctionDecl {
     std::vector<std::string> callableFrom;
     std::vector<std::string> allowedRoles;
     std::vector<StatementPtr> body;
+    std::vector<DescriptionClause> descriptions;
     SourceLocation location;
 
     void accept(AstVisitor& visitor) const;
@@ -266,6 +357,7 @@ struct StructDecl {
     std::vector<std::string> dependencies;
     std::vector<VarDecl> fields;
     std::vector<FunctionDecl> methods;
+    std::vector<DescriptionClause> descriptions;
     SourceLocation location;
 
     void accept(AstVisitor& visitor) const;
@@ -273,6 +365,11 @@ struct StructDecl {
 
 struct Program {
     bool requireEcc = false;
+    // 是否启用 `require std;`，及紧随其后的元说明子句。
+    bool requireStd = false;
+    std::optional<StdImport> stdImport;
+    // 顶层 `external` 绑定集合。
+    std::vector<ExternalDecl> externalDecls;
     std::vector<FunctionDecl> functions;
     std::vector<StructDecl> structs;
 

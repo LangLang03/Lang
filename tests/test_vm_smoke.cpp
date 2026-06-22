@@ -26,7 +26,7 @@ namespace {
 constexpr auto programText = R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x = 41;
+    declare mutable readable writable purpose computational scope local int of width bit32 x = 41;
     assign x = compute (x + 1) with overflow trap;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain root with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
@@ -205,7 +205,7 @@ TEST_CASE("VM rejects alwaysdeny approval", "[vm]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x = 1;
+    declare mutable readable writable purpose computational scope local int of width bit32 x = 1;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain root with approval of alwaysdeny with approval justification "ok" with approval timeout 1000;
 }
 )"};
@@ -228,9 +228,9 @@ function public callable returnable void main() code size 128 max stack size 64 
 
 TEST_CASE("VM executes authorized user function calls with role checks", "[vm][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
-function public callable void printplus(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+function public callable void printplus(readable int of width bit32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 y = compute (x + 1) with overflow trap;
+    declare mutable readable writable purpose computational scope local int of width bit32 y = compute (x + 1) with overflow trap;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
@@ -256,15 +256,15 @@ function public callable returnable void main() code size 128 max stack size 64 
 
 TEST_CASE("VM executes approval functions with operator input", "[vm][approval][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
-function public approval returnable readable bool:1 traderconfirm(readable char:8[] details) code size 128 max stack size 64 requires security level 1 allowed roles trader {
+function public approval returnable readable bool of width bit1 traderconfirm(readable char of width bit8[] details) code size 128 max stack size 64 requires security level 1 allowed roles trader {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local bool:1 decision = false;
+    declare mutable readable writable purpose computational scope local bool of width bit1 decision = false;
     operatorinput prompt details timeout 1000 into decision with io operation because literal "declared operator input";
     return decision;
 }
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles trader {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 amount = 7;
+    declare mutable readable writable purpose computational scope local int of width bit32 amount = 7;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = amount } discarding return predictstackdepth 4 with authority chain trader with approval of traderconfirm with approval justification "ok" with approval timeout 1000;
 }
 )"};
@@ -286,13 +286,13 @@ function public callable returnable void main() code size 128 max stack size 64 
 
 TEST_CASE("VM assigns and invokes function pointers", "[vm][fptr][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
-function public callable void printvalue(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+function public callable void printvalue(readable int of width bit32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose linkage scope local fptr<return:void, params:(int:32), security:1, maxstack:64, codesize:128> fp;
+    declare mutable readable writable purpose linkage scope local fptr<return:void, params:(int of width bit32), security:1, maxstack:64, codesize:128> fp;
     authorize fptr assignment of fp to printvalue with capture { } with attest "ok" with authority chain root;
     authorize invocation via fp at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 9 } discarding return predictstackdepth 8 nullcheck true with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
@@ -317,9 +317,9 @@ TEST_CASE("compiler lowers gate expressions to VM logic", "[compiler][vm][gate][
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local bool:1 a = true;
-    declare mutable readable writable purpose computational scope local bool:1 b = false;
-    declare mutable readable writable purpose computational scope local bool:1 result = gate { wire a, b, out; xor(a, b, out); yield out; };
+    declare mutable readable writable purpose computational scope local bool of width bit1 a = true;
+    declare mutable readable writable purpose computational scope local bool of width bit1 b = false;
+    declare mutable readable writable purpose computational scope local bool of width bit1 result = gate { wire a, b, out; xor(a, b, out); yield out; };
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = result } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
@@ -343,7 +343,7 @@ TEST_CASE("VM handles while break and continue", "[vm][control][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x = 0;
+    declare mutable readable writable purpose computational scope local int of width bit32 x = 0;
     while (x authorize use operator < 5 because literal "loop guard authorizes less-than operator use") {
         proceed assign x = compute (x + 1) with overflow trap;
         if (x authorize use operator == 3 because literal "continue branch authorizes equality operator use") judging authorized by root because literal "continue branch is approved by loop paperwork" expects elseifs 0 else 0 {
@@ -376,7 +376,7 @@ TEST_CASE("authorized return values can be assigned", "[compiler][vm][return][sm
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x = 0;
+    declare mutable readable writable purpose computational scope local int of width bit32 x = 0;
     assign x = authorize invocation of inputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "read" with arguments { } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
@@ -401,7 +401,7 @@ TEST_CASE("VM supports flattened field assignment and access", "[compiler][vm][f
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose storage scope local int:32 tx;
+    declare mutable readable writable purpose storage scope local int of width bit32 tx;
     assign tx.amount = 55;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = tx.amount } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
@@ -426,7 +426,7 @@ TEST_CASE("VM handles for loops", "[vm][control][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x = 0;
+    declare mutable readable writable purpose computational scope local int of width bit32 x = 0;
     for (; x authorize use operator < 1 because literal "for loop authorizes less-than operator use"; x) {
         proceed assign x = 1;
         authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
@@ -453,8 +453,8 @@ TEST_CASE("VM runs conditional expressions, compound assignments, and proof obli
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 512 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x = 0;
-    declare mutable readable writable purpose computational scope local bool:1 flag = false;
+    declare mutable readable writable purpose computational scope local int of width bit32 x = 0;
+    declare mutable readable writable purpose computational scope local bool of width bit1 flag = false;
     assign x += flag ? 100 : 1;
     if (x authorize use operator == 0 because literal "primary arithmetic judgment authorizes equality operator use") judging authorized by root because literal "primary arithmetic judgment has been requested" expects elseifs 1 else 1 {
         proceed assign x += 100;
@@ -487,7 +487,7 @@ TEST_CASE("VM enforces loop invariants and decreasing variants", "[vm][syntax][p
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 1024 max stack size 256 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x = 0;
+    declare mutable readable writable purpose computational scope local int of width bit32 x = 0;
     do invariant (x authorize use operator >= 0 because literal "loop invariant authorizes greater-equal operator use") because literal "x is administratively classified as nonnegative" decreases (4 - x) because literal "the remaining iteration budget must strictly descend" {
         proceed assign x += 1;
         if (x authorize use operator == 2 because literal "continue judgment authorizes equality operator use") judging authorized by root because literal "continue judgment is part of the decreasing variant ceremony" expects elseifs 0 else 0 {
@@ -540,7 +540,7 @@ TEST_CASE("VM runs the UTF-8 grade management ceremony", "[vm][utf8][gradebook][
 
 TEST_CASE("VM grants roles through authority chains", "[vm][roles][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
-function public callable void guarded(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles trader {
+function public callable void guarded(readable int of width bit32 x) code size 128 max stack size 64 requires security level 1 allowed roles trader {
     proceed verifyfunctionidentity();
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain trader with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
@@ -568,7 +568,7 @@ function public callable returnable void main() code size 256 max stack size 128
 
 TEST_CASE("VM rejects calls after role revocation", "[vm][roles]") {
     torture::SourceFile source{"<test>", R"(require ecc;
-function public callable void guarded(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles trader {
+function public callable void guarded(readable int of width bit32 x) code size 128 max stack size 64 requires security level 1 allowed roles trader {
     proceed verifyfunctionidentity();
 }
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
@@ -597,7 +597,7 @@ function public callable returnable void main() code size 256 max stack size 128
 
 TEST_CASE("VM enforces grantor requirements", "[vm][roles][grantor]") {
     torture::SourceFile source{"<test>", R"(require ecc;
-function public callable void guarded(readable int:32 x) code size 128 max stack size 64 requires security level 1 requires grantor root allowed roles trader {
+function public callable void guarded(readable int of width bit32 x) code size 128 max stack size 64 requires security level 1 requires grantor root allowed roles trader {
     proceed verifyfunctionidentity();
 }
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
@@ -625,7 +625,7 @@ function public callable returnable void main() code size 256 max stack size 128
 
 TEST_CASE("VM enforces callable-from requirements", "[vm][callablefrom]") {
     torture::SourceFile source{"<test>", R"(require ecc;
-function public callable void guarded(readable int:32 x) where callable from broker code size 128 max stack size 64 requires security level 1 allowed roles admin {
+function public callable void guarded(readable int of width bit32 x) where callable from broker code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
 }
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
@@ -652,13 +652,13 @@ function public callable returnable void main() code size 256 max stack size 128
 
 TEST_CASE("VM uses return values from user functions", "[vm][return][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
-function public callable returnable readable int:32 addone(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+function public callable returnable readable int of width bit32 addone(readable int of width bit32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     return compute (x + 1) with overflow trap;
 }
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 y = 0;
+    declare mutable readable writable purpose computational scope local int of width bit32 y = 0;
     assign y = authorize invocation of addone at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 9 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
@@ -681,13 +681,13 @@ function public callable returnable void main() code size 256 max stack size 128
 
 TEST_CASE("authorized function calls can be used as expressions", "[compiler][vm][return][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
-function public callable returnable readable int:32 addone(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+function public callable returnable readable int of width bit32 addone(readable int of width bit32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     return compute (x + 1) with overflow trap;
 }
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 y = authorize invocation of addone at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 40 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    declare mutable readable writable purpose computational scope local int of width bit32 y = authorize invocation of addone at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 40 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
@@ -709,15 +709,15 @@ function public callable returnable void main() code size 256 max stack size 128
 
 TEST_CASE("authorized fptr calls can be used as expressions", "[compiler][vm][fptr][return][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
-function public callable returnable readable int:32 addone(readable int:32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+function public callable returnable readable int of width bit32 addone(readable int of width bit32 x) code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     return compute (x + 1) with overflow trap;
 }
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose linkage scope local fptr<return:int:32, params:(int:32), security:1, maxstack:64, codesize:128> fp;
+    declare mutable readable writable purpose linkage scope local fptr<return:int of width bit32, params:(int of width bit32), security:1, maxstack:64, codesize:128> fp;
     authorize fptr assignment of fp to addone with capture { } with attest "ok" with authority chain root;
-    declare mutable readable writable purpose computational scope local int:32 y = authorize invocation via fp at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 9 } predictstackdepth 4 nullcheck true with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
+    declare mutable readable writable purpose computational scope local int of width bit32 y = authorize invocation via fp at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "call" with arguments { x by value = 9 } predictstackdepth 4 nullcheck true with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = y } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
 )"};
@@ -739,13 +739,13 @@ function public callable returnable void main() code size 256 max stack size 128
 
 TEST_CASE("VM passes writable references across function calls", "[vm][reference][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
-function public callable void bump(readable writable ptr<readable writable, int:32> target) code size 128 max stack size 64 requires security level 1 allowed roles admin {
+function public callable void bump(readable writable ptr<readable writable, int of width bit32> target) code size 128 max stack size 64 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
     assign *target = compute ( *target + 1) with overflow trap;
 }
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 x = 4;
+    declare mutable readable writable purpose computational scope local int of width bit32 x = 4;
     authorize invocation of bump at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "bump" with arguments { target by reference = &x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = x } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
 }
@@ -770,9 +770,9 @@ TEST_CASE("VM supports copymemory and comparememory on references", "[vm][memory
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 512 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:32 src = 77;
-    declare mutable readable writable purpose computational scope local int:32 dst = 0;
-    declare mutable readable writable purpose computational scope local int:32 cmp = 99;
+    declare mutable readable writable purpose computational scope local int of width bit32 src = 77;
+    declare mutable readable writable purpose computational scope local int of width bit32 dst = 0;
+    declare mutable readable writable purpose computational scope local int of width bit32 cmp = 99;
     authorize invocation of copymemory at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "copy" with arguments { dst by reference = &dst, src by reference = &src, length by value = 1 } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     assign cmp = authorize invocation of comparememory at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "compare" with arguments { left by reference = &dst, right by reference = &src, length by value = 1 } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = dst } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
@@ -799,7 +799,7 @@ TEST_CASE("VM supports inputchar outputchar and ECC verification", "[vm][stdlib]
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose io scope local char:8 ch = 0;
+    declare mutable readable writable purpose io scope local char of width bit8 ch = 0;
     assign ch = authorize invocation of inputchar at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "read" with arguments { } predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     authorize invocation of outputchar at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "write" with arguments { value by value = ch } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     authorize invocation of verifymemoryintegrity at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "ecc" with arguments { } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
@@ -825,9 +825,9 @@ TEST_CASE("VM applies overflow policies", "[vm][overflow][smoke]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 512 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:64 wrapped = compute (9223372036854775807 + 1) with overflow wrap;
-    declare mutable readable writable purpose computational scope local int:64 saturated = compute (9223372036854775807 + 1) with overflow saturate;
-    declare mutable readable writable purpose computational scope local int:64 extended = compute (9223372036854775807 + 1) with overflow extend;
+    declare mutable readable writable purpose computational scope local int of width bit64 wrapped = compute (9223372036854775807 + 1) with overflow wrap;
+    declare mutable readable writable purpose computational scope local int of width bit64 saturated = compute (9223372036854775807 + 1) with overflow saturate;
+    declare mutable readable writable purpose computational scope local int of width bit64 extended = compute (9223372036854775807 + 1) with overflow extend;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = wrapped } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = saturated } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
     authorize invocation of outputint at security level 1 with memory limit 128 with timeout 1000 with io operation because literal "declared io operation" with justification "print" with arguments { value by value = extended } discarding return predictstackdepth 4 with authority chain admin with approval of alwaysapprove with approval justification "ok" with approval timeout 1000;
@@ -853,7 +853,7 @@ TEST_CASE("VM traps overflow when requested", "[vm][overflow]") {
     torture::SourceFile source{"<test>", R"(require ecc;
 function public callable returnable void main() code size 256 max stack size 128 requires security level 1 allowed roles admin {
     proceed verifyfunctionidentity();
-    declare mutable readable writable purpose computational scope local int:64 x = compute (9223372036854775807 + 1) with overflow trap;
+    declare mutable readable writable purpose computational scope local int of width bit64 x = compute (9223372036854775807 + 1) with overflow trap;
 }
 )"};
     torture::Diagnostics diagnostics;
@@ -921,7 +921,7 @@ TEST_CASE("VM lets struct methods mutate fields through self references", "[vm][
         "clone",
     };
     std::string text = "require ecc;\nstruct record = struct {\n";
-    text += "    declare mutable readable writable purpose storage scope local int:32 amount;\n";
+    text += "    declare mutable readable writable purpose storage scope local int of width bit32 amount;\n";
     text += "} implement {\n";
     for (const auto* name : names) {
         text += "method public callable returnable void ";
@@ -1130,4 +1130,37 @@ TEST_CASE("inspect bytecode shows current platform name", "[vm][platform][inspec
     const auto text = torture::vm::inspectBytecode(*bytecode);
     CHECK(text.find("platform=") != std::string::npos);
     CHECK(text.find(std::string{currentPlatform().suffix}) != std::string::npos);
+}
+
+TEST_CASE("VM rejects apply external at run time when the binding library does not exist", "[vm][apply][ffi][smoke]") {
+    // 从 fixture 加载 `external` 绑定与 `apply external ...` 14 段手续的完整程序。
+    const char* paths[] = {"fixtures/valid/ffibind.torture", "../fixtures/valid/ffibind.torture"};
+    std::optional<torture::SourceFile> loaded;
+    for (const auto* path : paths) {
+        std::ifstream in(path);
+        if (!in) {
+            continue;
+        }
+        std::ostringstream text;
+        text << in.rdbuf();
+        loaded = torture::SourceFile{path, text.str()};
+        break;
+    }
+    REQUIRE(loaded.has_value());
+
+    torture::Diagnostics diagnostics;
+    REQUIRE(torture::compiler::checkIndentation(*loaded, diagnostics));
+    const auto lexed = torture::compiler::lexSource(*loaded, diagnostics);
+    auto parsed = torture::compiler::parseTokens(lexed.tokens, diagnostics);
+    REQUIRE(parsed.has_value());
+    REQUIRE(torture::compiler::checkProgramSemantics(*parsed, diagnostics));
+    auto bytecode = torture::compiler::compileToBytecode(*parsed, diagnostics);
+    REQUIRE(bytecode.has_value());
+
+    std::istringstream input;
+    std::ostringstream output;
+    // 运行期应当因为 FFI 校验（库文件不存在 / 平台不匹配 / SHA-512 链断裂 / binding 缺失）
+    // 而中止执行。
+    CHECK_FALSE(torture::vm::runBytecode(*bytecode, input, output, diagnostics));
+    REQUIRE(diagnostics.hasErrors());
 }
